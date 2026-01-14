@@ -29,7 +29,7 @@ router.get("/canned-messages", async (req, res) => {
     const { data: messages, error } = await supabase
       .from("canned_message")
       .select("canned_id, canned_message")
-      .eq("role_id", 3)
+      .eq("role_id", userData.role_id)
       .eq("canned_is_active", true);
 
     if (error) throw error;
@@ -138,6 +138,7 @@ router.get("/chatgroups", async (req, res) => {
 
 router.get("/:clientId", async (req, res) => {
   const { clientId } = req.params;
+  console.log('clientId: ', clientId)
   const { before, limit = 10 } = req.query;
 
   // Find all groups that belong to this client (usually 1, but safe for >1)
@@ -247,5 +248,8 @@ async function handleSendMessage(rawMessage, io, socket) {
     console.error("handleSendMessage error:", err.message);
   }
 }
+
+
+
 
 module.exports = { router, handleSendMessage };

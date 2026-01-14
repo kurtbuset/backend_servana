@@ -476,6 +476,59 @@ router.put('/:prof_id', async (req, res) => {
   }
 });
 
+router.post("/client", async (req, res) => {
+  try {
+    const { message, clientId, deptId } = req.body;
+
+    if (!message || !clientId) {
+      return res.status(400).json({ error: "Missing message or clientId" });
+    }
+
+    // Check if chat group exists for this client
+    let { data: chatGroups, error: groupErr } = await supabase
+      .from("chat_group")
+      .select("*")
+      .eq("client_id", clientId);
+
+    if (groupErr) throw groupErr;
+
+    let chatGroupId;
+    if (!chatGroups || chatGroups.length === 0) {
+      // Create new chat group
+      const { data: newGroup, error: createErr } = await supabase
+        .from("chat_group")
+        .insert([{ client_id: clientId, dept_id: deptId }])
+        .select("*")
+        .single();
+
+      if (createErr) throw createErr;
+      chatGroupId = newGroup.chat_group_id;
+    } else {
+      chatGroupId = chatGroups[0].chat_group_id;
+    }
+
+    // Insert message
+    const { data, error: insertErr } = await supabase
+      .from("chat")
+      .insert([
+        {
+          chat_group_id: chatGroupId,
+          client_id: clientId,
+          sys_user_id: null,
+          chat_body: message,
+        },
+      ])
+      .select("*");
+
+    if (insertErr) throw insertErr;
+
+    res.json({ success: true, message: data[0] });
+  } catch (err) {
+    console.error("❌ Error sending client message:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Global error handler 
 router.use((err, req, res, next) => {
   console.error("Unhandled error:", err);

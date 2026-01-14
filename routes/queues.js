@@ -8,7 +8,7 @@ const getCurrentUser = require("../middleware/getCurrentUser"); // attaches req.
 router.use(getCurrentUser);
 
 router.get("/chatgroups", async (req, res) => {
-  console.log('chatgroup reached')
+  // console.log('chatgroup reached')
   try {
     const { data: groups, error } = await supabase
       .from("chat_group")
