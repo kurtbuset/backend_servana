@@ -7,33 +7,153 @@ const getCurrentUser = require("../middleware/getCurrentUser"); // attaches req.
 
 router.use(getCurrentUser);
 
+// Debug endpoint to check all chat_groups
+router.get("/debug/all-chats", async (req, res) => {
+  try {
+    const { data: allGroups, error } = await supabase
+      .from("chat_group")
+      .select("*");
+    
+    console.log('All chat groups:', allGroups);
+    console.log('Error:', error);
+    
+    res.json({
+      total: allGroups?.length || 0,
+      pending: allGroups?.filter(g => g.sys_user_id === null).length || 0,
+      assigned: allGroups?.filter(g => g.sys_user_id !== null).length || 0,
+      groups: allGroups
+    });
+  } catch (err) {
+    console.error('Debug error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Create test chat group for debugging
+router.post("/debug/create-test-chat", async (req, res) => {
+  try {
+    // Get first available client
+    const { data: clients, error: clientError } = await supabase
+      .from("client")
+      .select("client_id, prof_id")
+      .limit(1);
+    
+    if (clientError || !clients || clients.length === 0) {
+      return res.status(400).json({ 
+        error: "No clients found. Please create a client first.",
+        hint: "You need at least one client in the database"
+      });
+    }
+
+    // Get first available department
+    const { data: departments, error: deptError } = await supabase
+      .from("department")
+      .select("dept_id")
+      .eq("dept_is_active", true)
+      .limit(1);
+    
+    if (deptError || !departments || departments.length === 0) {
+      return res.status(400).json({ 
+        error: "No departments found. Please create a department first.",
+        hint: "You need at least one active department"
+      });
+    }
+
+    const clientId = clients[0].client_id;
+    const deptId = departments[0].dept_id;
+
+    // Create chat_group
+    const { data: chatGroup, error: groupError } = await supabase
+      .from("chat_group")
+      .insert({
+        client_id: clientId,
+        dept_id: deptId,
+        sys_user_id: null,
+        chat_group_name: `Test Chat ${Date.now()}`
+      })
+      .select()
+      .single();
+
+    if (groupError) {
+      return res.status(500).json({ error: groupError.message });
+    }
+
+    // Create initial message
+    const { data: message, error: msgError } = await supabase
+      .from("chat")
+      .insert({
+        chat_group_id: chatGroup.chat_group_id,
+        client_id: clientId,
+        sys_user_id: null,
+        chat_body: "Hello! I need help with my account.",
+        chat_created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (msgError) {
+      console.error("Message creation error:", msgError);
+    }
+
+    res.json({
+      success: true,
+      message: "Test chat created successfully!",
+      chatGroup: chatGroup,
+      initialMessage: message
+    });
+  } catch (err) {
+    console.error('Create test chat error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/chatgroups", async (req, res) => {
   // console.log('chatgroup reached')
   try {
+    // First, try a simple query to see if we can get any data
+    const { data: simpleGroups, error: simpleError } = await supabase
+      .from("chat_group")
+      .select("*")
+      .is("sys_user_id", null);
+    
+    console.log('Simple query result:', simpleGroups);
+    console.log('Simple query error:', simpleError);
+
+    // Now try the full query with joins
     const { data: groups, error } = await supabase
       .from("chat_group")
-      .select(
-        `
-    chat_group_id,
-    dept_id,
-    sys_user_id,
-    department:department(dept_name),
-    client:client!chat_group_client_id_fkey(
-      client_id,
-      client_number,
-      prof_id,
-      profile:profile(
-        prof_firstname,
-        prof_lastname
-      )
-    )
-  `
-      )
-      .is("sys_user_id", null) // Only get chat_groups with no agent assigned
+      .select(`
+        chat_group_id,
+        dept_id,
+        sys_user_id,
+        client_id,
+        department:dept_id(dept_name),
+        client:client_id(
+          client_id,
+          client_number,
+          prof_id,
+          profile:prof_id(
+            prof_firstname,
+            prof_lastname
+          )
+        )
+      `)
+      .is("sys_user_id", null);
 
-    if (error) throw error;
+    console.log('Full query error:', error);
+    console.log('Groups found:', groups);
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(500).json({ 
+        error: error.message,
+        details: error.details,
+        hint: error.hint
+      });
+    }
 
     if (!groups || groups.length === 0) {
+      console.log('No pending chat groups found');
       return res.json([]);
     }
 
@@ -69,10 +189,13 @@ router.get("/chatgroups", async (req, res) => {
 
     const formatted = groups.map((group) => {
       const client = group.client;
-      if (!client) return null;
+      if (!client) {
+        console.log('Group missing client:', group);
+        return null;
+      }
 
       const fullName = client.profile
-        ? `${client.profile.prof_firstname} ${client.profile.prof_lastname}`
+        ? `${client.profile.prof_firstname || ''} ${client.profile.prof_lastname || ''}`.trim()
         : "Unknown Client";
 
       return {
@@ -83,16 +206,20 @@ router.get("/chatgroups", async (req, res) => {
           id: client.client_id,
           chat_group_id: group.chat_group_id,
           name: fullName,
-          number: client.client_number,
+          number: client.client_number || "No number",
           profile: imageMap[client.prof_id] || null,
           time: "9:00 AM",
+          sys_user_id: group.sys_user_id, // Include this for frontend
+          isAccepted: false // Mark as not accepted
         },
       };
     });
-    console.log(groups)
-    console.log(formatted)
+    
+    console.log('Formatted groups:', formatted);
+    const result = formatted.filter(Boolean);
+    console.log('Returning', result.length, 'chat groups');
 
-    res.json(formatted.filter(Boolean));
+    res.json(result);
   } catch (err) {
     console.error("❌ Error fetching chat groups:", err);
     res.status(500).json({ error: "Failed to fetch chat groups" });
@@ -212,6 +339,62 @@ router.get("/:clientId", async (req, res) => {
   res.json({ messages });
 });
 
+
+
+// POST /queues/:chatGroupId/accept - Agent accepts a chat from queue
+router.post("/:chatGroupId/accept", async (req, res) => {
+  try {
+    const { chatGroupId } = req.params;
+    const agentId = req.userId; // from getCurrentUser middleware
+
+    // Check if chat_group exists and is not already assigned
+    const { data: chatGroup, error: checkError } = await supabase
+      .from("chat_group")
+      .select("chat_group_id, sys_user_id, client_id")
+      .eq("chat_group_id", chatGroupId)
+      .single();
+
+    if (checkError || !chatGroup) {
+      return res.status(404).json({ error: "Chat group not found" });
+    }
+
+    if (chatGroup.sys_user_id) {
+      return res.status(400).json({ error: "Chat already assigned to another agent" });
+    }
+
+    // Assign agent to chat_group
+    const { error: updateError } = await supabase
+      .from("chat_group")
+      .update({ sys_user_id: agentId })
+      .eq("chat_group_id", chatGroupId);
+
+    if (updateError) throw updateError;
+
+    // Add to junction table
+    const { error: junctionError } = await supabase
+      .from("sys_user_chat_group")
+      .insert({
+        sys_user_id: agentId,
+        chat_group_id: chatGroupId
+      });
+
+    if (junctionError) throw junctionError;
+
+    // Broadcast count updates via socket
+    // Note: You'll need to import io from index.js or pass it differently
+    // For now, we'll emit from the client side after receiving success
+
+    res.json({
+      success: true,
+      message: "Chat accepted successfully",
+      agentId: agentId,
+      chatGroupId: chatGroupId
+    });
+  } catch (err) {
+    console.error("❌ Error accepting chat:", err);
+    res.status(500).json({ error: "Failed to accept chat" });
+  }
+});
 
 
 module.exports = router;

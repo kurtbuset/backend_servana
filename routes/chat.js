@@ -8,6 +8,67 @@ const getCurrentUser = require("../middleware/getCurrentUser"); // attaches req.
 
 router.use(getCurrentUser);
 
+// GET /chat/counts - Get pending and active chat counts
+router.get("/counts", async (req, res) => {
+  try {
+    const { userId } = req;
+
+    // Get user's role_id to determine if admin or agent
+    const { data: userData, error: userError } = await supabase
+      .from("sys_user")
+      .select("role_id")
+      .eq("sys_user_id", userId)
+      .single();
+
+    if (userError || !userData) {
+      return res.status(403).json({ error: "User not found" });
+    }
+
+    const isAdmin = userData.role_id === 1;
+
+    // Count pending chats (in queue - not assigned to any agent)
+    // These are chat_groups that exist but have no sys_user_id assigned
+    const { count: pendingCount, error: pendingError } = await supabase
+      .from("chat_group")
+      .select("chat_group_id", { count: "exact", head: true })
+      .is("sys_user_id", null); // Not assigned to any agent yet
+
+    if (pendingError) throw pendingError;
+
+    // Count active chats based on role
+    let activeCount = 0;
+    
+    if (isAdmin) {
+      // Admin sees all active chats (assigned to any agent)
+      const { count, error: activeError } = await supabase
+        .from("chat_group")
+        .select("chat_group_id", { count: "exact", head: true })
+        .not("sys_user_id", "is", null); // Assigned to an agent
+
+      if (activeError) throw activeError;
+      activeCount = count || 0;
+    } else {
+      // Agent sees only their assigned chats
+      // Check sys_user_chat_group junction table for agent's assigned chats
+      const { count, error: activeError } = await supabase
+        .from("sys_user_chat_group")
+        .select("id", { count: "exact", head: true })
+        .eq("sys_user_id", userId);
+
+      if (activeError) throw activeError;
+      activeCount = count || 0;
+    }
+
+    res.json({
+      pendingChats: pendingCount || 0,
+      activeChats: activeCount
+    });
+  } catch (err) {
+    console.error("❌ Error fetching chat counts:", err);
+    res.status(500).json({ error: "Failed to fetch chat counts" });
+  }
+});
+
 router.get("/canned-messages", async (req, res) => {
   try {
     const { userId } = req; // from getCurrentUser middleware

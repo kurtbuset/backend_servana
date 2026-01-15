@@ -14,13 +14,37 @@ router.use(getCurrentUser);
  * Utility: fetch minimal user+profile rows given sys_user_id.
  */
 async function fetchUserAndProfile(sysUserId) {
-  // 1) system_user
+  // 1) system_user with role information
   const {
     data: userRow,
     error: userErr,
   } = await supabase
     .from("sys_user")
-    .select("sys_user_id, sys_user_email, prof_id")
+    .select(`
+      sys_user_id, 
+      sys_user_email, 
+      prof_id,
+      role_id,
+      role:role_id (
+        role_id,
+        role_name,
+        priv_id,
+        privilege:priv_id (
+          priv_can_view_message,
+          priv_can_message,
+          priv_can_manage_profile,
+          priv_can_use_canned_mess,
+          priv_can_end_chat,
+          priv_can_transfer,
+          priv_can_manage_dept,
+          priv_can_assign_dept,
+          priv_can_manage_role,
+          priv_can_assign_role,
+          priv_can_create_account,
+          priv_can_manage_auto_reply
+        )
+      )
+    `)
     .eq("sys_user_id", sysUserId)
     .single();
   if (userErr || !userRow) {
@@ -78,6 +102,8 @@ router.get("/", async (req, res) => {
     res.json({
       sys_user_id: userRow.sys_user_id,
       sys_user_email: userRow.sys_user_email,
+      role_id: userRow.role_id,
+      role: userRow.role,
       profile: profRow,
       image,
     });

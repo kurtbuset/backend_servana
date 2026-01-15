@@ -30,6 +30,17 @@ router.post('/', async (req, res) => {
   }
 
   try {
+    // Check if department with same name already exists
+    const { data: existingDept, error: checkError } = await supabase
+      .from('department')
+      .select('dept_id')
+      .ilike('dept_name', dept_name.trim())
+      .single();
+
+    if (existingDept) {
+      return res.status(400).json({ error: 'This department already exists' });
+    }
+
     const { data, error } = await supabase
       .from('department')
       .insert([
@@ -61,6 +72,20 @@ router.put('/:id', async (req, res) => {
   }
 
   try {
+    // Check if department with same name already exists (excluding current department)
+    if (dept_name) {
+      const { data: existingDept, error: checkError } = await supabase
+        .from('department')
+        .select('dept_id')
+        .ilike('dept_name', dept_name.trim())
+        .neq('dept_id', id)
+        .single();
+
+      if (existingDept) {
+        return res.status(400).json({ error: 'This department already exists' });
+      }
+    }
+
     const updateData = {
       dept_updated_at: new Date(),
       dept_updated_by,

@@ -49,6 +49,18 @@ router.post("/", async (req, res) => {
   const { text, dept_id, active = true, created_by } = req.body;
 
   try {
+    // Check if macro with same message already exists for this role
+    const { data: existingMacro, error: checkError } = await supabase
+      .from("canned_message")
+      .select("canned_id")
+      .eq("role_id", 2)
+      .ilike("canned_message", text.trim())
+      .single();
+
+    if (existingMacro) {
+      return res.status(400).json({ error: "This macro already exists" });
+    }
+
     const { data, error } = await supabase
       .from("canned_message")
       .insert([{
@@ -88,6 +100,21 @@ router.put("/:id", async (req, res) => {
   const { text, active, dept_id, updated_by } = req.body;
 
   try {
+    // Check if macro with same message already exists (excluding current macro)
+    if (text) {
+      const { data: existingMacro, error: checkError } = await supabase
+        .from("canned_message")
+        .select("canned_id")
+        .eq("role_id", 2)
+        .ilike("canned_message", text.trim())
+        .neq("canned_id", id)
+        .single();
+
+      if (existingMacro) {
+        return res.status(400).json({ error: "This macro already exists" });
+      }
+    }
+
     const { data, error } = await supabase
       .from("canned_message")
       .update({
