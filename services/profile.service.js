@@ -6,10 +6,10 @@ class ProfileService {
    * Fetch user and profile data
    */
   async fetchUserAndProfile(sysUserId) {
-    // Fetch system_user
+    // Fetch system_user with role_name from role table
     const { data: userRow, error: userErr } = await supabase
       .from("sys_user")
-      .select("sys_user_id, sys_user_email, prof_id")
+      .select("sys_user_id, sys_user_email, prof_id, role_id, role:role_id(role_name)")
       .eq("sys_user_id", sysUserId)
       .single();
 
