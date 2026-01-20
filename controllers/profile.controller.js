@@ -30,20 +30,97 @@ class ProfileController {
       const sysUserId = req.userId;
 
       const { userRow, profRow } = await profileService.fetchUserAndProfile(sysUserId);
-      const image = await profileService.fetchCurrentImage(profRow.prof_id);
+      
+      // Only fetch image if profile exists and has a prof_id
+      let image = null;
+      if (profRow && profRow.prof_id) {
+        image = await profileService.fetchCurrentImage(profRow.prof_id);
+      }
 
-      res.json({
+      // Fetch user's role privileges
+      let privileges = null;
+      if (userRow.role_id) {
+        try {
+          console.log(`🔍 Fetching privileges for user ${sysUserId} with role_id: ${userRow.role_id}`);
+          
+          // First get the role to find the priv_id
+          const { data: roleData, error: roleError } = await require("../helpers/supabaseClient")
+            .from("role")
+            .select("priv_id, role_name")
+            .eq("role_id", userRow.role_id)
+            .single();
+
+          console.log(`🔍 Role query result:`, { roleData, roleError });
+
+          if (!roleError && roleData?.priv_id) {
+            console.log(`🔍 Found role "${roleData.role_name}" with priv_id: ${roleData.priv_id}`);
+            
+            // Then fetch the privilege data using the priv_id
+            const { data: privData, error: privError } = await require("../helpers/supabaseClient")
+              .from("privilege")
+              .select(`
+                priv_id,
+                priv_can_view_message,
+                priv_can_message,
+                priv_can_manage_profile,
+                priv_can_use_canned_mess,
+                priv_can_end_chat,
+                priv_can_transfer,
+                priv_can_manage_dept,
+                priv_can_assign_dept,
+                priv_can_manage_role,
+                priv_can_assign_role,
+                priv_can_create_account,
+                priv_can_manage_auto_reply
+              `)
+              .eq("priv_id", roleData.priv_id)
+              .single();
+
+            console.log(`🔍 Privilege query result:`, { privData, privError });
+
+            if (!privError && privData) {
+              privileges = privData;
+              console.log("✅ Successfully fetched privileges for priv_id:", roleData.priv_id);
+              console.log("✅ Privilege values:", privileges);
+            } else {
+              console.error("❌ Failed to fetch privilege data:", privError);
+              console.error("❌ Attempted to fetch priv_id:", roleData.priv_id);
+            }
+          } else {
+            console.error("❌ Failed to fetch role data or no priv_id found:", roleError);
+            console.error("❌ Attempted to fetch role_id:", userRow.role_id);
+          }
+        } catch (privError) {
+          console.error("❌ Exception while fetching user privileges:", privError.message);
+        }
+      } else {
+        console.warn("⚠️ User has no role_id assigned");
+      }
+
+      const responseData = {
         sys_user_id: userRow.sys_user_id,
         sys_user_email: userRow.sys_user_email,
         role_id: userRow.role_id,
         role_name: userRow.role?.role_name || null,
+        privilege: privileges, // Add privileges to the response
         profile: profRow,
         image,
+      };
+
+      console.log("🔍 Profile Controller - Sending response:", {
+        user_id: responseData.sys_user_id,
+        role_id: responseData.role_id,
+        role_name: responseData.role_name,
+        has_privileges: !!responseData.privilege,
+        privilege_keys: responseData.privilege ? Object.keys(responseData.privilege) : [],
+        has_profile: !!profRow?.prof_id
       });
+
+      res.json(responseData);
     } catch (err) {
       console.error("Error fetching profile:", err.message);
       
-      if (err.message === "User not found" || err.message === "Profile not found") {
+      if (err.message === "User not found") {
         return res.status(404).json({ error: err.message });
       }
       
@@ -58,6 +135,12 @@ class ProfileController {
     try {
       const sysUserId = req.userId;
       const { firstName, middleName, lastName, email, address, dateOfBirth } = req.body;
+
+      // Check if user has permission to manage profile
+      const hasPermission = await profileService.checkUserPermission(sysUserId, 'priv_can_manage_profile');
+      if (!hasPermission) {
+        return res.status(403).json({ error: "You don't have permission to edit your profile" });
+      }
 
       const profId = await profileService.getProfileId(sysUserId);
 
@@ -97,6 +180,12 @@ class ProfileController {
 
       if (!file) {
         return res.status(400).json({ error: "No image uploaded" });
+      }
+
+      // Check if user has permission to manage profile
+      const hasPermission = await profileService.checkUserPermission(sysUserId, 'priv_can_manage_profile');
+      if (!hasPermission) {
+        return res.status(403).json({ error: "You don't have permission to edit your profile" });
       }
 
       const profId = await profileService.getProfileId(sysUserId);

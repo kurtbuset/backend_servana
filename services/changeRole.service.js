@@ -6,7 +6,7 @@ class ChangeRoleService {
    */
   async getAllUsersWithRoles() {
     const { data: users, error: userError } = await supabase
-      .from("system_user")
+      .from("sys_user")
       .select(`
         sys_user_id,
         sys_user_email,
@@ -63,7 +63,7 @@ class ChangeRoleService {
     if (typeof isActive === "boolean") updateData.sys_user_is_active = isActive;
 
     const { data, error } = await supabase
-      .from("system_user")
+      .from("sys_user")
       .update(updateData)
       .eq("sys_user_id", userId)
       .select("sys_user_id, sys_user_email, role_id, sys_user_is_active")

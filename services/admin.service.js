@@ -1,4 +1,5 @@
 const supabase = require("../helpers/supabaseClient");
+const profileService = require("./profile.service");
 
 const ADMIN_ROLE_ID = 1;
 
@@ -21,37 +22,92 @@ class AdminService {
    * Create a new admin
    */
   async createAdmin(email, password, createdBy) {
-    // Create user in Supabase Auth
-    const { data: createdUser, error: authErr } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-    });
+    let supabaseUserId = null;
+    let profileId = null;
+    let newUserId = null;
 
-    if (authErr) {
-      throw new Error(authErr.message);
+    try {
+      console.log(`🔄 Creating admin: ${email}`);
+
+      // Step 1: Create user in Supabase Auth
+      const { data: createdUser, error: authErr } = await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
+
+      if (authErr) {
+        console.error('❌ Auth user creation failed:', authErr);
+        throw new Error(authErr.message);
+      }
+
+      supabaseUserId = createdUser.user.id;
+      console.log(`✅ Auth user created: ${supabaseUserId}`);
+
+      // Step 2: Create profile
+      const profile = await profileService.createMinimalProfile();
+      profileId = profile.prof_id;
+      console.log(`✅ Profile created: ${profileId}`);
+
+      // Step 3: Insert into sys_user table with profile link
+      const { data, error } = await supabase
+        .from("sys_user")
+        .insert([
+          {
+            sys_user_email: email,
+            sys_user_is_active: true,
+            role_id: ADMIN_ROLE_ID,
+            prof_id: profileId, // Link to the created profile
+            sys_user_created_by: createdBy,
+            sys_user_updated_by: createdBy,
+            supabase_user_id: supabaseUserId,
+          },
+        ])
+        .select("sys_user_id, sys_user_email, sys_user_is_active, supabase_user_id")
+        .single();
+
+      if (error) {
+        console.error('❌ System user creation failed:', error);
+        throw error;
+      }
+
+      newUserId = data.sys_user_id;
+      console.log(`✅ System user created: ${newUserId}`);
+      console.log(`✅ Admin creation completed successfully: ${email}`);
+
+      return data;
+
+    } catch (error) {
+      console.error(`❌ Admin creation failed for ${email}:`, error.message);
+
+      // Rollback operations in reverse order
+      try {
+        // Remove system user if created
+        if (newUserId) {
+          console.log(`🔄 Rolling back system user: ${newUserId}`);
+          await supabase.from("sys_user").delete().eq("sys_user_id", newUserId);
+        }
+
+        // Remove profile if created
+        if (profileId) {
+          console.log(`🔄 Rolling back profile: ${profileId}`);
+          await supabase.from("profile").delete().eq("prof_id", profileId);
+        }
+
+        // Remove auth user if created
+        if (supabaseUserId) {
+          console.log(`🔄 Rolling back auth user: ${supabaseUserId}`);
+          await supabase.auth.admin.deleteUser(supabaseUserId);
+        }
+
+        console.log('✅ Rollback completed successfully');
+      } catch (rollbackError) {
+        console.error('❌ Rollback failed:', rollbackError.message);
+        // Don't throw rollback error, throw original error
+      }
+
+      throw error;
     }
-
-    const supabaseUserId = createdUser.user.id;
-
-    // Insert into system_user table
-    const { data, error } = await supabase
-      .from("system_user")
-      .insert([
-        {
-          sys_user_email: email,
-          sys_user_is_active: true,
-          role_id: ADMIN_ROLE_ID,
-          sys_user_created_by: createdBy,
-          sys_user_updated_by: createdBy,
-          supabase_user_id: supabaseUserId,
-        },
-      ])
-      .select("sys_user_id, sys_user_email, sys_user_is_active, supabase_user_id")
-      .single();
-
-    if (error) throw error;
-    return data;
   }
 
   /**
@@ -60,7 +116,7 @@ class AdminService {
   async updateAdmin(adminId, email, password, isActive, updatedBy) {
     // Fetch supabase_user_id
     const { data: existingUser, error: fetchErr } = await supabase
-      .from("system_user")
+      .from("sys_user")
       .select("supabase_user_id")
       .eq("sys_user_id", adminId)
       .single();
@@ -88,7 +144,7 @@ class AdminService {
       }
     }
 
-    // Update in system_user table
+    // Update in sys_user table
     const updateData = {
       sys_user_updated_by: updatedBy,
       sys_user_updated_at: new Date(),
@@ -99,7 +155,7 @@ class AdminService {
     if (isActive !== undefined) updateData.sys_user_is_active = isActive;
 
     const { data, error } = await supabase
-      .from("system_user")
+      .from("sys_user")
       .update(updateData)
       .eq("sys_user_id", adminId)
       .select("sys_user_id, sys_user_email, sys_user_is_active, supabase_user_id")
@@ -115,7 +171,7 @@ class AdminService {
   async toggleAdminStatus(adminId, isActive, updatedBy) {
     // Fetch supabase_user_id
     const { data: existingUser, error: fetchErr } = await supabase
-      .from("system_user")
+      .from("sys_user")
       .select("supabase_user_id")
       .eq("sys_user_id", adminId)
       .single();
@@ -133,9 +189,9 @@ class AdminService {
 
     if (disableErr) throw new Error(disableErr.message);
 
-    // Update in system_user
+    // Update in sys_user
     const { data, error } = await supabase
-      .from("system_user")
+      .from("sys_user")
       .update({
         sys_user_is_active: isActive,
         sys_user_updated_at: new Date(),

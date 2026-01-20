@@ -19,6 +19,8 @@
   },
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "test": "node tests/profile.service.test.js",
+    "test:profile": "node tests/profile.service.test.js"
   }
 }

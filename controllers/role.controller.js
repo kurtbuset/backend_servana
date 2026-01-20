@@ -17,6 +17,12 @@ class RoleController {
     // Update existing role
     router.put("/:id", (req, res) => this.updateRole(req, res));
 
+    // Get members for a specific role
+    router.get("/:roleId/members", (req, res) => this.getRoleMembers(req, res));
+
+    // Update member permissions
+    router.put("/:roleId/members/:userId/permissions", (req, res) => this.updateMemberPermissions(req, res));
+
     return router;
   }
   /**
@@ -84,6 +90,75 @@ class RoleController {
       }
 
       res.status(500).json({ error: err.message });
+    }
+  }
+
+  /**
+   * Get all members for a specific role
+   */
+  async getRoleMembers(req, res) {
+    try {
+      const roleId = parseInt(req.params.roleId);
+
+      if (!roleId || isNaN(roleId)) {
+        return res.status(400).json({ error: "Valid role ID is required" });
+      }
+
+      const members = await roleService.getRoleMembers(roleId);
+
+      res.json({
+        roleId: roleId,
+        members: members,
+        totalCount: members.length
+      });
+    } catch (err) {
+      console.error("Error fetching role members:", err.message);
+      res.status(500).json({ error: "Failed to fetch role members" });
+    }
+  }
+
+  /**
+   * Update member permissions
+   */
+  async updateMemberPermissions(req, res) {
+    try {
+      const roleId = parseInt(req.params.roleId);
+      const userId = parseInt(req.params.userId);
+      const { permission, value } = req.body;
+
+      // Validation
+      if (!roleId || isNaN(roleId)) {
+        return res.status(400).json({ error: "Valid role ID is required" });
+      }
+
+      if (!userId || isNaN(userId)) {
+        return res.status(400).json({ error: "Valid user ID is required" });
+      }
+
+      if (!permission || typeof value !== 'boolean') {
+        return res.status(400).json({ error: "Permission and boolean value are required" });
+      }
+
+      // Currently only supporting chat permission updates
+      if (permission !== 'priv_can_view_message') {
+        return res.status(400).json({ error: "Only 'priv_can_view_message' permission is supported" });
+      }
+
+      // Update the permission
+      await roleService.updateUserChatPermission(userId, value);
+
+      res.json({
+        success: true,
+        message: "Member permission updated successfully",
+        updatedUser: {
+          userId: userId,
+          permission: permission,
+          value: value
+        }
+      });
+    } catch (err) {
+      console.error("Error updating member permission:", err.message);
+      res.status(500).json({ error: "Failed to update member permission" });
     }
   }
 }
