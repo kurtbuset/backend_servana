@@ -83,21 +83,46 @@ const io = socketIo(server, {
 });
 
 io.on('connection', (socket) => {
-  console.log(`Admin Client connected: ${socket.id}`);
+  console.log(`Client connected: ${socket.id}`);
   
-  socket.on('mobileConnected', () => {
-    console.log('Mobile client connected:', socket.id);
-  });
-  
+  // Join a chat group room
   socket.on('joinChatGroup', (groupId) => { 
     socket.join(groupId);
     console.log(`Socket ${socket.id} joined chat_group ${groupId}`);
   });
 
-  socket.on('sendMessage', async (message) => {
-    await chatController.handleSendMessage(message, io, socket);
+  // Handle message from web (agent)
+  socket.on('sendMessage', async (messageData) => {
+    console.log('Message from web agent:', messageData);
+    
+    try {
+      // Save message to database via controller - it also broadcasts receiveMessage
+      const savedMessage = await chatController.handleSendMessage(messageData, io, socket);
+      
+      // Also emit newMessage for mobile compatibility
+      if (savedMessage) {
+        io.to(messageData.chat_group_id).emit('newMessage', savedMessage);
+      }
+    } catch (error) {
+      console.error('Error handling sendMessage:', error);
+      socket.emit('messageError', { error: 'Failed to send message' });
+    }
+  });
 
-    io.to(message.chatGroupId).emit('newMessage', message.message);
+  // Handle message from mobile (client)
+  socket.on('sendMessageMobile', async (messageData) => {
+    console.log('Message from mobile client:', messageData);
+    
+    try {
+      // Mobile already saved the message via API, just broadcast it
+      io.to(messageData.chat_group_id).emit('newMessage', messageData);
+      
+      // Also emit to web-specific event
+      io.to(messageData.chat_group_id).emit('receiveMessage', messageData);
+    } catch (error) {
+      console.error('Error handling sendMessageMobile:', error);
+      socket.emit('messageError', { error: 'Failed to send message' });
+    }
   });
 
   socket.on('disconnect', () => {

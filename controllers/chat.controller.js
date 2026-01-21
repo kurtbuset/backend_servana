@@ -134,9 +134,15 @@ class ChatController {
       if (insertedMessage) {
         // Broadcast message to the specific chat group
         io.to(String(message.chat_group_id)).emit("receiveMessage", insertedMessage);
+        
+        // Return the inserted message for further processing
+        return insertedMessage;
       }
+      
+      return null;
     } catch (err) {
       console.error("❌ handleSendMessage error:", err.message);
+      throw err;
     }
   }
 }

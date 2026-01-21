@@ -51,7 +51,7 @@ class MobileMessageService {
       throw new Error("Could not retrieve chat group");
     }
 
-    return group.chat_group_id;
+    return group;
   }
 
   /**
@@ -64,7 +64,6 @@ class MobileMessageService {
         {
           dept_id: department,
           client_id: clientId,
-          chat_group_name: `Chat with Dept ${department}`,
         },
       ])
       .select()

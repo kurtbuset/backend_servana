@@ -4,24 +4,41 @@ class QueueService {
   /**
    * Get unassigned chat groups (queue)
    */
-  async getUnassignedChatGroups() {
+  async getUnassignedChatGroups(userId) {
+    // First, get all department IDs assigned to this user
+    const { data: userDepartments, error: deptError } = await supabase
+      .from("sys_user_department")
+      .select("dept_id")
+      .eq("sys_user_id", userId);
+
+    if (deptError) throw deptError;
+
+    // If user has no assigned departments, return empty array
+    if (!userDepartments || userDepartments.length === 0) {
+      return [];
+    }
+
+    // Extract dept_ids into an array
+    const deptIds = userDepartments.map(d => d.dept_id);
+
+    // Get chat groups that match user's departments
     const { data: groups, error } = await supabase
       .from("chat_group")
       .select(`
-        chat_group_id,
-        dept_id,
-        department:department(dept_name),
-        client:client!chat_group_client_id_fkey(
-          client_id,
-          client_number,
-          prof_id,
-          profile:profile(
-            prof_firstname,
-            prof_lastname
-          )
+      chat_group_id,
+      dept_id,
+      department:department(dept_name),
+      client:client!chat_group_client_id_fkey(
+        client_id,
+        client_number,
+        prof_id,
+        profile:profile(
+          prof_firstname,
+          prof_lastname
         )
-      `)
-      .is("sys_user_id", null); // Only get chat_groups with no agent assigned
+      )
+    `)
+      .in("dept_id", deptIds) // Only get chat groups with matching department
 
     if (error) throw error;
     return groups || [];
@@ -72,7 +89,7 @@ class QueueService {
   async getChatGroupsByClient(clientId) {
     const { data: groups, error } = await supabase
       .from("chat_group")
-      .select("chat_group_id, sys_user_id")
+      .select("chat_group_id")
       .eq("client_id", clientId);
 
     if (error) throw error;
