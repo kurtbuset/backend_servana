@@ -6,6 +6,7 @@ class MobileMessageController {
   getRouter() {
     const router = express.Router();
 
+    // Apply authentication middleware to all routes
     router.use(getCurrentMobileUser);
 
     // Create a new message
@@ -66,9 +67,9 @@ class MobileMessageController {
     try {
       const clientId = req.userId;
 
-      const chatGroupId = await mobileMessageService.getLatestChatGroup(clientId);
+      const chatGroup = await mobileMessageService.getLatestChatGroup(clientId);
 
-      res.status(200).json({ chat_group_id: chatGroupId });
+      res.status(200).json(chatGroup);
     } catch (err) {
       console.error("❌ Could not retrieve latest chat group:", err.message);
       res.status(404).json({ error: err.message });

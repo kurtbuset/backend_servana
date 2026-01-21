@@ -253,7 +253,6 @@ chat
 ├── chat_id (PK)
 ├── chat_group_id (FK → chat_group)
 ├── client_id (FK → client, nullable)
-├── sys_user_id (FK → system_user, nullable)
 ├── chat_body
 └── chat_created_at
 

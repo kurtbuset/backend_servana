@@ -21,7 +21,8 @@ class QueueController {
    */
   async getChatGroups(req, res) {
     try {
-      const groups = await queueService.getUnassignedChatGroups();
+      const userId = req.userId
+      const groups = await queueService.getUnassignedChatGroups(userId);
 
       if (!groups || groups.length === 0) {
         return res.json([]);
@@ -88,27 +89,27 @@ class QueueController {
       for (const group of groups) {
         const { chat_group_id, sys_user_id } = group;
 
-        if (sys_user_id === null) {
-          // Update chat_group.sys_user_id to current user
-          await queueService.assignChatGroupToUser(chat_group_id, userId);
+        // if (sys_user_id === null) {
+        //   // Update chat_group.sys_user_id to current user
+        //   await queueService.assignChatGroupToUser(chat_group_id, userId);
 
-          // Check if sys_user_chat_group already exists
-          const existingLink = await queueService.checkUserChatGroupLink(userId, chat_group_id);
+        //   // Check if sys_user_chat_group already exists
+        //   const existingLink = await queueService.checkUserChatGroupLink(userId, chat_group_id);
 
-          // Insert new sys_user_chat_group link if not exists
-          if (!existingLink) {
-            await queueService.createUserChatGroupLink(userId, chat_group_id);
-          }
+        //   // Insert new sys_user_chat_group link if not exists
+        //   if (!existingLink) {
+        //     await queueService.createUserChatGroupLink(userId, chat_group_id);
+        //   }
 
-          groupIdsToFetch.push(chat_group_id);
-        } else {
-          // Still add to groupIdsToFetch if user already linked
-          const existingLink = await queueService.checkUserChatGroupLink(userId, chat_group_id);
+        //   groupIdsToFetch.push(chat_group_id);
+        // } else {
+        //   // Still add to groupIdsToFetch if user already linked
+        //   const existingLink = await queueService.checkUserChatGroupLink(userId, chat_group_id);
 
-          if (existingLink) {
+        //   if (existingLink) {
             groupIdsToFetch.push(chat_group_id);
-          }
-        }
+          // }
+        // }
       }
 
       // Fetch chats

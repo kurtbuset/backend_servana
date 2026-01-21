@@ -12,18 +12,17 @@ class ClientAccountController {
     router.post("/auth/verify-otp", (req, res) => this.verifyOtp(req, res));
     router.post("/auth/complete-registration", (req, res) => this.completeRegistration(req, res));
     router.post("/logincl", (req, res) => this.loginClient(req, res));
-    router.patch("/chat_group/:id/set-department", (req, res) => this.setChatGroupDepartment(req, res));
-    router.put("/:prof_id", (req, res) => this.updateProfile(req, res));
-    router.post("/client", (req, res) => this.sendClientMessage(req, res));
+
+    // Protected routes (authentication required)
+    router.patch("/chat_group/:id/set-department", getCurrentMobileUser, (req, res) => this.setChatGroupDepartment(req, res));
+    router.put("/:prof_id", getCurrentMobileUser, (req, res) => this.updateProfile(req, res));
+    router.post("/client", getCurrentMobileUser, (req, res) => this.sendClientMessage(req, res));
 
     // Global error handler
     router.use((err, req, res, next) => {
       console.error("Unhandled error:", err);
       res.status(500).json({ error: "Internal server error", details: String(err) });
     });
-
-    // Protected routes (authentication required)
-    router.use(getCurrentMobileUser);
 
     return router;
   }
@@ -152,12 +151,16 @@ class ClientAccountController {
       // Delete OTP
       await clientAccountService.deleteOtp(otpData.otp_id);
 
+      // Generate JWT token
+      const token = clientAccountService.generateToken(clientData.client_id, clientData.client_number);
+
       res.status(200).json({
         message: "Account created successfully",
         client: {
           ...clientData,
           prof_id: profileData,
         },
+        token,
       });
     } catch (err) {
       console.error("Complete registration error:", err);
@@ -190,13 +193,13 @@ class ClientAccountController {
       const token = clientAccountService.generateToken(client.client_id, client.client_number);
 
       // Get or create chat group
-      const chatGroupId = await clientAccountService.getOrCreateChatGroup(client.client_id);
+      // const chatGroupId = await clientAccountService.getOrCreateChatGroup(client.client_id);
 
       res.status(200).json({
         message: "Login successful",
         client,
         token,
-        chat_group_id: chatGroupId,
+        // chat_group_id: chatGroupId,
         chat_group_name: `Client ${client.client_id} Chat`,
       });
     } catch (err) {
