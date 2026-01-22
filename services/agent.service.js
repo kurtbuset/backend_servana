@@ -1,13 +1,32 @@
 const supabase = require("../helpers/supabaseClient");
 const profileService = require("./profile.service");
 
+// Role name constants - more maintainable than hardcoded IDs
+const ROLE_NAMES = {
+  AGENT: "Agent",
+  ADMIN: "Admin",
+  CLIENT: "Client",
+};
+
 class AgentService {
   /**
    * Get all agents with their departments
    */
   async getAllAgents() {
     try {
-      // First, get all users with agent role (role_id = 3)
+      // First, get the agent role ID by role name
+      const { data: agentRole, error: roleError } = await supabase
+        .from("role")
+        .select("role_id")
+        .eq("role_name", ROLE_NAMES.AGENT) // Use constant instead of hardcoded string
+        .single();
+
+      if (roleError || !agentRole) {
+        console.error("Error fetching agent role:", roleError);
+        throw new Error("Agent role not found");
+      }
+
+      // Get all users with agent role
       const { data: users, error: userError } = await supabase
         .from("sys_user")
         .select(`
@@ -16,7 +35,7 @@ class AgentService {
           sys_user_is_active,
           role_id
         `)
-        .eq("role_id", 3) // Only get agents
+        .eq("role_id", agentRole.role_id)
         .order("sys_user_email", { ascending: true });
 
       if (userError) {

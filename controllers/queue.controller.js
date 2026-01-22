@@ -21,20 +21,25 @@ class QueueController {
    */
   async getChatGroups(req, res) {
     try {
-      const userId = req.userId
+      const userId = req.userId;
       const groups = await queueService.getUnassignedChatGroups(userId);
 
       if (!groups || groups.length === 0) {
         return res.json([]);
       }
 
-      // Extract profile IDs
+      // Extract profile IDs and chat group IDs
       const profIds = groups
         .map((g) => g.client?.prof_id)
         .filter((id) => id !== undefined && id !== null);
 
-      // Get profile images
-      const imageMap = await queueService.getProfileImages(profIds);
+      const chatGroupIds = groups.map((g) => g.chat_group_id);
+
+      // Get profile images and latest message times
+      const [imageMap, timeMap] = await Promise.all([
+        queueService.getProfileImages(profIds),
+        queueService.getLatestMessageTimes(chatGroupIds),
+      ]);
 
       // Format response
       const formatted = groups.map((group) => {
@@ -44,6 +49,18 @@ class QueueController {
         const fullName = client.profile
           ? `${client.profile.prof_firstname} ${client.profile.prof_lastname}`
           : "Unknown Client";
+
+        // Get latest message time or use current time as fallback
+        const latestTime = timeMap[group.chat_group_id];
+        const displayTime = latestTime
+          ? new Date(latestTime).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : new Date().toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            });
 
         return {
           chat_group_id: group.chat_group_id,
@@ -55,7 +72,7 @@ class QueueController {
             name: fullName,
             number: client.client_number,
             profile: imageMap[client.prof_id] || null,
-            time: "9:00 AM",
+            time: displayTime,
           },
         };
       });

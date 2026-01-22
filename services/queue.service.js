@@ -84,6 +84,32 @@ class QueueService {
   }
 
   /**
+   * Get latest message timestamp for chat groups
+   */
+  async getLatestMessageTimes(chatGroupIds) {
+    if (!chatGroupIds || chatGroupIds.length === 0) return {};
+
+    const { data: messages, error } = await supabase
+      .from("chat")
+      .select("chat_group_id, chat_created_at")
+      .in("chat_group_id", chatGroupIds)
+      .not("client_id", "is", null) // Only get messages from clients
+      .order("chat_created_at", { ascending: false });
+
+    if (error) throw error;
+
+    // Create a map of chat_group_id to latest message time
+    const timeMap = {};
+    (messages || []).forEach((msg) => {
+      if (!timeMap[msg.chat_group_id]) {
+        timeMap[msg.chat_group_id] = msg.chat_created_at;
+      }
+    });
+
+    return timeMap;
+  }
+
+  /**
    * Get chat groups for a client
    */
   async getChatGroupsByClient(clientId) {

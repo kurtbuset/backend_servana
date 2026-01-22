@@ -1,17 +1,34 @@
 const supabase = require("../helpers/supabaseClient");
 const profileService = require("./profile.service");
 
-const ADMIN_ROLE_ID = 1;
-
 class AdminService {
+  /**
+   * Get the Admin role ID dynamically
+   */
+  async getAdminRoleId() {
+    const { data, error } = await supabase
+      .from("role")
+      .select("role_id")
+      .eq("role_name", "Admin")
+      .single();
+
+    if (error || !data) {
+      throw new Error("Admin role not found in database");
+    }
+
+    return data.role_id;
+  }
+
   /**
    * Get all admins
    */
   async getAllAdmins() {
+    const adminRoleId = await this.getAdminRoleId();
+
     const { data, error } = await supabase
       .from("sys_user")
       .select("sys_user_id, sys_user_email, sys_user_is_active, supabase_user_id")
-      .eq("role_id", ADMIN_ROLE_ID)
+      .eq("role_id", adminRoleId)
       .order("sys_user_email", { ascending: true });
 
     if (error) throw error;
@@ -28,6 +45,8 @@ class AdminService {
 
     try {
       console.log(`🔄 Creating admin: ${email}`);
+
+      const adminRoleId = await this.getAdminRoleId();
 
       // Step 1: Create user in Supabase Auth
       const { data: createdUser, error: authErr } = await supabase.auth.admin.createUser({
@@ -56,7 +75,7 @@ class AdminService {
           {
             sys_user_email: email,
             sys_user_is_active: true,
-            role_id: ADMIN_ROLE_ID,
+            role_id: adminRoleId,
             prof_id: profileId, // Link to the created profile
             sys_user_created_by: createdBy,
             sys_user_updated_by: createdBy,
@@ -114,6 +133,8 @@ class AdminService {
    * Update an admin
    */
   async updateAdmin(adminId, email, password, isActive, updatedBy) {
+    const adminRoleId = await this.getAdminRoleId();
+
     // Fetch supabase_user_id
     const { data: existingUser, error: fetchErr } = await supabase
       .from("sys_user")
@@ -148,7 +169,7 @@ class AdminService {
     const updateData = {
       sys_user_updated_by: updatedBy,
       sys_user_updated_at: new Date(),
-      role_id: ADMIN_ROLE_ID,
+      role_id: adminRoleId,
     };
 
     if (email !== undefined) updateData.sys_user_email = email;
@@ -169,6 +190,8 @@ class AdminService {
    * Toggle admin active status
    */
   async toggleAdminStatus(adminId, isActive, updatedBy) {
+    const adminRoleId = await this.getAdminRoleId();
+
     // Fetch supabase_user_id
     const { data: existingUser, error: fetchErr } = await supabase
       .from("sys_user")
@@ -196,7 +219,7 @@ class AdminService {
         sys_user_is_active: isActive,
         sys_user_updated_at: new Date(),
         sys_user_updated_by: updatedBy,
-        role_id: ADMIN_ROLE_ID,
+        role_id: adminRoleId,
       })
       .eq("sys_user_id", adminId)
       .select("sys_user_id, sys_user_email, sys_user_is_active, supabase_user_id")
