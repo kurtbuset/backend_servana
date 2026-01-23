@@ -9,6 +9,23 @@ const OTP_EXPIRATION_MINUTES = 5;
 
 class ClientAccountService {
   /**
+   * Get the Client role ID dynamically
+   */
+  async getClientRoleId() {
+    const { data, error } = await supabase
+      .from("role")
+      .select("role_id")
+      .eq("role_name", "Client")
+      .single();
+
+    if (error || !data) {
+      throw new Error("Client role not found in database");
+    }
+
+    return data.role_id;
+  }
+
+  /**
    * Generate OTP
    */
   generateOtp(length = OTP_LENGTH) {
@@ -113,6 +130,8 @@ class ClientAccountService {
    * Create client
    */
   async createClient(phoneCountryCode, phoneNumber, hashedPassword, profId) {
+    const clientRoleId = await this.getClientRoleId();
+
     const { data, error } = await supabase
       .from("client")
       .insert({
@@ -123,7 +142,7 @@ class ClientAccountService {
         client_updated_at: new Date().toISOString(),
         client_is_active: true,
         client_is_verified: true,
-        role_id: 2,
+        role_id: clientRoleId,
       })
       .select()
       .single();

@@ -248,6 +248,23 @@ class RoleService {
   }
 
   /**
+   * Get role ID by role name
+   */
+  async getRoleId(roleName) {
+    const { data, error } = await supabase
+      .from("role")
+      .select("role_id")
+      .eq("role_name", roleName)
+      .single();
+
+    if (error || !data) {
+      throw new Error(`${roleName} role not found in database`);
+    }
+
+    return data.role_id;
+  }
+
+  /**
    * Update individual user chat permission
    * Note: This is a simplified implementation that currently just logs the change
    * In a full implementation, this would require either:

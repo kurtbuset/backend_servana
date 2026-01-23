@@ -17,9 +17,7 @@ const profileController = require("./controllers/profile.controller");
 const clientAccountController = require("./controllers/mobile/clientAccount.controller");
 const mobileDepartmentController = require("./controllers/mobile/department.controller");
 const mobileMessageController = require("./controllers/mobile/message.controller");
-
-const AGENT_ROLE_ID = 3;
-const CLIENT_ROLE_ID = 2;
+const roleService = require('./services/role.service');
 
 const app = express();
 const http = require('http');
@@ -61,8 +59,28 @@ app.use("/profile", profileController.getRouter());
 app.use('/departments', departmentController.getRouter());
 app.use('/admins', adminController.getRouter());
 app.use('/auto-replies', autoReplyController.getRouter());
-app.use("/agents", macroController.getRouterForRole(AGENT_ROLE_ID));
-app.use("/clients", macroController.getRouterForRole(CLIENT_ROLE_ID));
+
+// Initialize role-based routes
+async function initializeRoleBasedRoutes() {
+  try {
+    const [AGENT_ROLE_ID, CLIENT_ROLE_ID] = await Promise.all([
+      roleService.getRoleId("Agent"),
+      roleService.getRoleId("Client")
+    ]);
+    
+    app.use("/agents", macroController.getRouterForRole(AGENT_ROLE_ID));
+    app.use("/clients", macroController.getRouterForRole(CLIENT_ROLE_ID));
+    
+    console.log(`✅ Role-based routes initialized successfully`);
+  } catch (error) {
+    console.error('❌ Failed to initialize role-based routes:', error.message);
+    process.exit(1);
+  }
+}
+
+// Initialize routes
+initializeRoleBasedRoutes();
+
 app.use("/change-role", changeRoleController.getRouter());
 app.use("/chat", chatController.getRouter());
 app.use("/queues", queueController.getRouter());
