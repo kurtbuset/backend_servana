@@ -11,8 +11,12 @@ class QueueController {
     // Get unassigned chat groups (queue)
     router.get("/chatgroups", (req, res) => this.getChatGroups(req, res));
 
+    // Accept a chat from the queue
+    router.post("/:chatGroupId/accept", (req, res) => this.acceptChat(req, res));
+
     // Get chat messages and assign to user
     router.get("/:clientId", (req, res) => this.getChatMessages(req, res));
+
 
     return router;
   }
@@ -73,6 +77,7 @@ class QueueController {
             number: client.client_number,
             profile: imageMap[client.prof_id] || null,
             time: displayTime,
+            status: group.status, // Include the actual status (queued or transferred)
           },
         };
       });
@@ -81,6 +86,40 @@ class QueueController {
     } catch (err) {
       console.error("❌ Error fetching chat groups:", err);
       res.status(500).json({ error: "Failed to fetch chat groups" });
+    }
+  }
+
+  /**
+   * Accept a chat from the queue
+   */
+  async acceptChat(req, res) {
+    try {
+      const { chatGroupId } = req.params;
+      const userId = req.userId;
+
+      if (!chatGroupId) {
+        return res.status(400).json({ error: "Chat group ID is required" });
+      }
+
+      const chatGroup = await queueService.acceptChat(chatGroupId, userId);
+
+      res.json({
+        success: true,
+        message: "Chat accepted successfully",
+        data: {
+          chat_group_id: chatGroup.chat_group_id,
+          sys_user_id: chatGroup.sys_user_id,
+          status: chatGroup.status
+        }
+      });
+    } catch (err) {
+      console.error("❌ Error accepting chat:", err);
+      
+      if (err.message === "Chat group not found or already assigned") {
+        return res.status(404).json({ error: err.message });
+      }
+      
+      res.status(500).json({ error: "Failed to accept chat" });
     }
   }
 
@@ -130,7 +169,7 @@ class QueueController {
       }
 
       // Fetch chats
-      const messages = await queueService.getChatMessages(clientId, groupIdsToFetch, before, limit);
+      const messages = await queueService.getChatMessages(clientId, groupIdsToFetch, before, limit, userId);
 
       res.json({ messages });
     } catch (err) {
