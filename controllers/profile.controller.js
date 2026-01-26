@@ -41,7 +41,7 @@ class ProfileController {
       let privileges = null;
       if (userRow.role_id) {
         try {
-          console.log(`🔍 Fetching privileges for user ${sysUserId} with role_id: ${userRow.role_id}`);
+          // console.log(`🔍 Fetching privileges for user ${sysUserId} with role_id: ${userRow.role_id}`);
           
           // First get the role to find the priv_id
           const { data: roleData, error: roleError } = await require("../helpers/supabaseClient")
@@ -50,10 +50,10 @@ class ProfileController {
             .eq("role_id", userRow.role_id)
             .single();
 
-          console.log(`🔍 Role query result:`, { roleData, roleError });
+          // console.log(`🔍 Role query result:`, { roleData, roleError });
 
           if (!roleError && roleData?.priv_id) {
-            console.log(`🔍 Found role "${roleData.role_name}" with priv_id: ${roleData.priv_id}`);
+            // console.log(`🔍 Found role "${roleData.role_name}" with priv_id: ${roleData.priv_id}`);
             
             // Then fetch the privilege data using the priv_id
             const { data: privData, error: privError } = await require("../helpers/supabaseClient")
@@ -81,7 +81,7 @@ class ProfileController {
             if (!privError && privData) {
               privileges = privData;
               console.log("✅ Successfully fetched privileges for priv_id:", roleData.priv_id);
-              console.log("✅ Privilege values:", privileges);
+              // console.log("✅ Privilege values:", privileges);
             } else {
               console.error("❌ Failed to fetch privilege data:", privError);
               console.error("❌ Attempted to fetch priv_id:", roleData.priv_id);
@@ -107,14 +107,14 @@ class ProfileController {
         image,
       };
 
-      console.log("🔍 Profile Controller - Sending response:", {
-        user_id: responseData.sys_user_id,
-        role_id: responseData.role_id,
-        role_name: responseData.role_name,
-        has_privileges: !!responseData.privilege,
-        privilege_keys: responseData.privilege ? Object.keys(responseData.privilege) : [],
-        has_profile: !!profRow?.prof_id
-      });
+      // console.log("🔍 Profile Controller - Sending response:", {
+      //   user_id: responseData.sys_user_id,
+      //   role_id: responseData.role_id,
+      //   role_name: responseData.role_name,
+      //   has_privileges: !!responseData.privilege,
+      //   privilege_keys: responseData.privilege ? Object.keys(responseData.privilege) : [],
+      //   has_profile: !!profRow?.prof_id
+      // });
 
       res.json(responseData);
     } catch (err) {

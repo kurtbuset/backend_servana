@@ -2,6 +2,11 @@ const supabase = require("../helpers/supabaseClient");
 const cookie = require("cookie");
 
 class ChatService {
+  constructor() {
+    this.userRoleCache = new Map();
+    this.cacheExpiry = 10 * 60 * 1000; // 10 minutes for user roles (stable data)
+  }
+
   /**
    * Get canned messages for a specific role
    */
@@ -17,9 +22,16 @@ class ChatService {
   }
 
   /**
-   * Get user's role ID
+   * Get user's role ID with caching
    */
   async getUserRole(userId) {
+    const cacheKey = `user_role_${userId}`;
+    const cached = this.userRoleCache.get(cacheKey);
+    
+    if (cached && Date.now() - cached.timestamp < this.cacheExpiry) {
+      return cached.data;
+    }
+
     const { data: userData, error: userError } = await supabase
       .from("sys_user")
       .select("role_id")
@@ -30,19 +42,27 @@ class ChatService {
       throw new Error("User not found or no role.");
     }
 
+    // Cache the role ID
+    this.userRoleCache.set(cacheKey, {
+      data: userData.role_id,
+      timestamp: Date.now()
+    });
+
     return userData.role_id;
   }
 
   /**
-   * Get all chat groups for a user
+   * Get all active chat groups for a user (only active chats)
    */
   async getChatGroupsByUser(userId) {
+    // Get only active chats assigned to user
     const { data: groups, error } = await supabase
       .from("chat_group")
       .select(`
         chat_group_id,
         dept_id,
-        sys_user_chat_group!inner(sys_user_id),
+        sys_user_id,
+        status,
         department:department(dept_name),
         client:client!chat_group_client_id_fkey(
           client_id,
@@ -54,71 +74,67 @@ class ChatService {
           )
         )
       `)
-      .eq("sys_user_chat_group.sys_user_id", userId);
+      .eq("status", "active")
+      .eq("sys_user_id", userId);
 
     if (error) throw error;
     return groups || [];
   }
 
   /**
-   * Get profile images for multiple profile IDs
+   * Get profile images for multiple profile IDs - Optimized single query
    */
   async getProfileImages(profIds) {
     if (!profIds || profIds.length === 0) return {};
 
-    const imageMap = {};
-
-    // Get current images
-    const { data: images, error: imgErr } = await supabase
+    // Single query with proper ordering to get current images first, then latest
+    const { data: images, error } = await supabase
       .from("image")
-      .select("prof_id, img_location")
+      .select("prof_id, img_location, img_is_current, img_created_at")
       .in("prof_id", profIds)
-      .eq("img_is_current", true);
+      .order("prof_id, img_is_current, img_created_at");
 
-    if (imgErr) throw imgErr;
+    if (error) throw error;
 
-    const foundIds = (images || []).map((i) => i.prof_id);
-    const missingIds = profIds.filter((id) => !foundIds.includes(id));
+    const imageMap = {};
+    const processedProfiles = new Set();
 
-    // Get latest images for missing profiles
-    if (missingIds.length > 0) {
-      const { data: latest, error: latestErr } = await supabase
-        .from("image")
-        .select("prof_id, img_location")
-        .in("prof_id", missingIds)
-        .order("img_created_at", { ascending: false });
-
-      if (!latestErr && latest) {
-        latest.forEach((i) => (imageMap[i.prof_id] = i.img_location));
+    // Process images - first occurrence per profile will be the best match
+    (images || []).forEach((img) => {
+      if (!processedProfiles.has(img.prof_id)) {
+        imageMap[img.prof_id] = img.img_location;
+        processedProfiles.add(img.prof_id);
       }
-    }
-
-    // Map current images
-    (images || []).forEach((i) => (imageMap[i.prof_id] = i.img_location));
+    });
 
     return imageMap;
   }
 
   /**
-   * Get latest message timestamp for chat groups
+   * Get latest message timestamp for chat groups - Optimized query
    */
   async getLatestMessageTimes(chatGroupIds) {
     if (!chatGroupIds || chatGroupIds.length === 0) return {};
 
+    // Optimized query with proper ordering to get latest message per group
     const { data: messages, error } = await supabase
       .from("chat")
       .select("chat_group_id, chat_created_at")
       .in("chat_group_id", chatGroupIds)
       .not("client_id", "is", null) // Only get messages from clients
-      .order("chat_created_at", { ascending: false });
+      .order("chat_group_id, chat_created_at");
 
     if (error) throw error;
 
     // Create a map of chat_group_id to latest message time
     const timeMap = {};
+    const processedGroups = new Set();
+
+    // Process messages - first occurrence per group will be the latest
     (messages || []).forEach((msg) => {
-      if (!timeMap[msg.chat_group_id]) {
+      if (!processedGroups.has(msg.chat_group_id)) {
         timeMap[msg.chat_group_id] = msg.chat_created_at;
+        processedGroups.add(msg.chat_group_id);
       }
     });
 
@@ -139,9 +155,9 @@ class ChatService {
   }
 
   /**
-   * Get chat messages with pagination
+   * Get chat messages with pagination and sender information
    */
-  async getChatMessages(clientId, before = null, limit = 10) {
+  async getChatMessages(clientId, before = null, limit = 10, currentUserId = null) {
     const groups = await this.getChatGroupsByClient(clientId);
     
     if (groups.length === 0) {
@@ -152,7 +168,13 @@ class ChatService {
 
     let query = supabase
       .from("chat")
-      .select("*")
+      .select(`
+        *,
+        sys_user:sys_user(
+          sys_user_id,
+          profile:profile(prof_firstname, prof_lastname)
+        )
+      `)
       .or([
         `client_id.eq.${clientId}`,
         `chat_group_id.in.(${groupIds.join(",")})`,
@@ -175,9 +197,46 @@ class ChatService {
         seen.add(r.chat_id);
         return true;
       })
+      .map((msg) => ({
+        ...msg,
+        sender_type: this.determineSenderType(msg, currentUserId),
+        sender_name: this.getSenderName(msg)
+      }))
       .reverse();
 
     return messages;
+  }
+
+  /**
+   * Determine the type of message sender
+   */
+  determineSenderType(message, currentUserId) {
+    if (message.client_id && !message.sys_user_id) {
+      return 'client';
+    } else if (message.sys_user_id) {
+      if (currentUserId && message.sys_user_id === currentUserId) {
+        return 'current_agent';
+      } else {
+        return 'previous_agent';
+      }
+    }
+    return 'system';
+  }
+
+  /**
+   * Get sender display name
+   */
+  getSenderName(message) {
+    if (message.client_id && !message.sys_user_id) {
+      return 'Client';
+    } else if (message.sys_user_id && message.sys_user?.profile) {
+      const firstName = message.sys_user.profile.prof_firstname || '';
+      const lastName = message.sys_user.profile.prof_lastname || '';
+      return `${firstName} ${lastName}`.trim() || 'Agent';
+    } else if (message.sys_user_id) {
+      return 'Agent';
+    }
+    return 'System';
   }
 
   /**
@@ -215,6 +274,17 @@ class ChatService {
   }
 
   /**
+   * Clear user role cache for a specific user or all users
+   */
+  clearUserRoleCache(userId = null) {
+    if (userId) {
+      this.userRoleCache.delete(`user_role_${userId}`);
+    } else {
+      this.userRoleCache.clear();
+    }
+  }
+
+  /**
    * Insert a new chat message
    */
   async insertMessage(messageData) {
@@ -225,6 +295,31 @@ class ChatService {
 
     if (insertError) throw insertError;
     return data && data.length > 0 ? data[0] : null;
+  }
+
+  /**
+   * Transfer chat group to another department
+   */
+  async transferChatGroup(chatGroupId, deptId, userId) {
+    const { data, error } = await supabase
+      .from("chat_group")
+      .update({
+        status: "transferred",
+        sys_user_id: null,
+        dept_id: deptId
+      })
+      .eq("chat_group_id", chatGroupId)
+      .eq("sys_user_id", userId) // Ensure only the assigned user can transfer
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    if (!data) {
+      throw new Error("Chat group not found or you don't have permission to transfer it");
+    }
+
+    return data;
   }
 }
 

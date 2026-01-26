@@ -64,6 +64,7 @@ class MobileMessageService {
         {
           dept_id: department,
           client_id: clientId,
+          status: "queued",
         },
       ])
       .select()
