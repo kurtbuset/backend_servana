@@ -27,11 +27,15 @@ const port = process.env.PORT || 3000;
 // ✅ Middleware
 app.use(express.static("public"));
 
+// Dynamic allowed origins from environment variables
 const allowedOrigins = [
-  'http://localhost:5173', // React web
-  'http://localhost:8081', // React Native Expo (optional)
-  // 'http://192.168.1.100:19006'
-];
+  process.env.REACT_WEB_URL || 'http://localhost:5173', // Development React web
+  process.env.REACT_WEB_PRODUCTION_URL, // Production React web
+  'http://localhost:5000', // Mobile development
+  'http://10.0.2.2:5000', // Android emulator
+].filter(Boolean); // Remove undefined values
+
+console.log('🌐 Allowed CORS origins:', allowedOrigins);
 
 app.use(cors({
   origin: function(origin, callback) {
@@ -95,7 +99,7 @@ app.use('/messages', mobileMessageController.getRouter()); // ✅ Mobile message
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: ['http://localhost:5173', 'http://localhost:5000', 'http://10.0.2.2:5000'], 
+    origin: allowedOrigins, // Use the same allowed origins as CORS
     credentials: true,
   }
 });
