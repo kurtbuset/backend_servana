@@ -76,7 +76,7 @@ class ProfileController {
               .eq("priv_id", roleData.priv_id)
               .single();
 
-            console.log(`🔍 Privilege query result:`, { privData, privError });
+            // console.log(`🔍 Privilege query result:`, { privData, privError });
 
             if (!privError && privData) {
               privileges = privData;
