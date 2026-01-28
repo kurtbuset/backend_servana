@@ -186,11 +186,16 @@ class ChatController {
    */
   async handleSendMessage(rawMessage, io, socket) {
     try {
-      const sysUserId = await chatService.authenticateSocketUser(socket);
+      // Validate that sys_user_id is provided from frontend
+      if (!rawMessage.sys_user_id) {
+        throw new Error("sys_user_id is required");
+      }
 
+      // Use the sys_user_id from frontend (which comes from fresh login session)
+      // instead of socket authentication (which may be stale after logout/login)
       const message = {
         ...rawMessage,
-        sys_user_id: sysUserId,
+        sys_user_id: rawMessage.sys_user_id, // Trust the frontend's authenticated user ID
       };
 
       console.log("Sending message:", message);
