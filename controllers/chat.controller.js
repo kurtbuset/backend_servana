@@ -56,7 +56,7 @@ class ChatController {
       // Extract profile IDs and chat group IDs more efficiently
       const profIds = [];
       const chatGroupIds = [];
-      
+
       // Single pass to extract both arrays
       groups.forEach((group) => {
         chatGroupIds.push(group.chat_group_id);
@@ -84,13 +84,13 @@ class ChatController {
         const latestTime = timeMap[group.chat_group_id];
         const displayTime = latestTime
           ? new Date(latestTime).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })
+            hour: "2-digit",
+            minute: "2-digit",
+          })
           : new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            });
+            hour: "2-digit",
+            minute: "2-digit",
+          });
 
         acc.push({
           sys_user_id: userId,
@@ -130,8 +130,8 @@ class ChatController {
       const { userId } = req;
 
       if (!chatGroupId || !deptId) {
-        return res.status(400).json({ 
-          error: "Chat group ID and department ID are required" 
+        return res.status(400).json({
+          error: "Chat group ID and department ID are required"
         });
       }
 
@@ -149,11 +149,11 @@ class ChatController {
       });
     } catch (err) {
       console.error("❌ Error transferring chat:", err);
-      
+
       if (err.message === "Chat group not found or you don't have permission to transfer it") {
         return res.status(404).json({ error: err.message });
       }
-      
+
       res.status(500).json({ error: "Failed to transfer chat" });
     }
   }
@@ -172,11 +172,11 @@ class ChatController {
       res.json({ messages });
     } catch (err) {
       console.error("❌ Error fetching chat messages:", err);
-      
+
       if (err.message === "Chat group not found") {
         return res.status(404).json({ error: err.message });
       }
-      
+
       res.status(500).json({ error: err.message });
     }
   }
@@ -198,22 +198,19 @@ class ChatController {
         sys_user_id: rawMessage.sys_user_id, // Trust the frontend's authenticated user ID
       };
 
-      console.log("Sending message:", message);
-
-      // Emit update to refresh chat groups list
-      io.emit("updateChatGroups");
+      console.log("Saving message to database:", message);
 
       // Insert message into database
       const insertedMessage = await chatService.insertMessage(message);
 
       if (insertedMessage) {
-        // Broadcast message to the specific chat group
-        io.to(String(message.chat_group_id)).emit("receiveMessage", insertedMessage);
-        
-        // Return the inserted message for further processing
+        // Emit update to refresh chat groups list
+        io.emit("updateChatGroups");
+
+        // Return the inserted message for socket handler to broadcast
         return insertedMessage;
       }
-      
+
       return null;
     } catch (err) {
       console.error("❌ handleSendMessage error:", err.message);

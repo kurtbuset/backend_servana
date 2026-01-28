@@ -107,10 +107,68 @@ const io = socketIo(server, {
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
   
-  // Join a chat group room
-  socket.on('joinChatGroup', (groupId) => { 
-    socket.join(groupId);
-    console.log(`Socket ${socket.id} joined chat_group ${groupId}`);
+  // Join a chat group room - with room switching support
+  socket.on('joinChatGroup', (data) => {
+    const { groupId, userType, userId } = data;
+    
+    // Leave previous room if agent was in another room
+    if (socket.chatGroupId && socket.chatGroupId !== groupId) {
+      socket.leave(String(socket.chatGroupId));
+      
+      // Notify previous room that agent left
+      socket.to(String(socket.chatGroupId)).emit('userLeft', {
+        userType: socket.userType,
+        userId: socket.userId,
+        chatGroupId: socket.chatGroupId
+      });
+      
+      console.log(`${userType} ${userId} left chat_group ${socket.chatGroupId}`);
+    }
+    
+    // Join new room
+    socket.join(String(groupId));
+    socket.chatGroupId = groupId;
+    socket.userType = userType;
+    socket.userId = userId;
+    
+    console.log(`${userType} ${userId} joined chat_group ${groupId}`);
+    
+    // Notify new room that user joined
+    socket.to(String(groupId)).emit('userJoined', {
+      userType,
+      userId,
+      chatGroupId: groupId
+    });
+  });
+
+  // Handle explicit room leaving
+  socket.on('leavePreviousRoom', () => {
+    if (socket.chatGroupId) {
+      socket.leave(String(socket.chatGroupId));
+      
+      // Notify room that agent left
+      socket.to(String(socket.chatGroupId)).emit('userLeft', {
+        userType: socket.userType,
+        userId: socket.userId,
+        chatGroupId: socket.chatGroupId
+      });
+      
+      console.log(`${socket.userType} ${socket.userId} left chat_group ${socket.chatGroupId}`);
+    }
+  });
+
+  // Handle specific room leaving
+  socket.on('leaveRoom', (roomId) => {
+    socket.leave(String(roomId));
+    
+    // Notify room that user left
+    socket.to(String(roomId)).emit('userLeft', {
+      userType: socket.userType,
+      userId: socket.userId,
+      chatGroupId: roomId
+    });
+    
+    console.log(`${socket.userType} ${socket.userId} left chat_group ${roomId}`);
   });
 
   // Handle message from web (agent)
@@ -118,12 +176,17 @@ io.on('connection', (socket) => {
     console.log('Message from web agent:', messageData);
     
     try {
-      // Save message to database via controller - it also broadcasts receiveMessage
+      // Save message to database via controller
       const savedMessage = await chatController.handleSendMessage(messageData, io, socket);
       
-      // Also emit newMessage for mobile compatibility
       if (savedMessage) {
-        io.to(messageData.chat_group_id).emit('newMessage', savedMessage);
+        const roomId = String(messageData.chat_group_id);
+        
+        // Always broadcast to the chat_group room - real-time if client is in same room
+        io.to(roomId).emit('receiveMessage', savedMessage);
+        io.to(roomId).emit('newMessage', savedMessage);
+        
+        console.log(`✅ Message broadcasted to chat_group ${messageData.chat_group_id}`);
       }
     } catch (error) {
       console.error('Error handling sendMessage:', error);
@@ -136,11 +199,13 @@ io.on('connection', (socket) => {
     console.log('Message from mobile client:', messageData);
     
     try {
-      // Mobile already saved the message via API, just broadcast it
-      io.to(messageData.chat_group_id).emit('newMessage', messageData);
+      const roomId = String(messageData.chat_group_id);
       
-      // Also emit to web-specific event
-      io.to(messageData.chat_group_id).emit('receiveMessage', messageData);
+      // Always broadcast to the chat_group room - real-time if agent is in same room
+      io.to(roomId).emit('newMessage', messageData);
+      io.to(roomId).emit('receiveMessage', messageData);
+      
+      console.log(`✅ Mobile message broadcasted to chat_group ${messageData.chat_group_id}`);
     } catch (error) {
       console.error('Error handling sendMessageMobile:', error);
       socket.emit('messageError', { error: 'Failed to send message' });
@@ -149,6 +214,15 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log(`❌ Client disconnected: ${socket.id}`);
+    
+    // Notify room members about user leaving
+    if (socket.chatGroupId && socket.userType) {
+      socket.to(String(socket.chatGroupId)).emit('userLeft', {
+        userType: socket.userType,
+        userId: socket.userId,
+        chatGroupId: socket.chatGroupId
+      });
+    }
   });
 });
 
