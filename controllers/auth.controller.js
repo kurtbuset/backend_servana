@@ -114,8 +114,19 @@ class AuthController {
    * Logout user
    */
   logout(req, res) {
-    res.clearCookie("access_token");
-    res.clearCookie("refresh_token");
+    // Clear cookies with the same options used when setting them
+    res.clearCookie("access_token", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+    });
+
+    res.clearCookie("refresh_token", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+    });
+
     res.json({ message: "Logged out" });
   }
 }
