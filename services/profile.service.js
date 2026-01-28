@@ -194,6 +194,43 @@ class ProfileService {
   }
 
   /**
+   * Fetch user departments
+   */
+  async fetchUserDepartments(sysUserId) {
+    try {
+      const { data: deptAgents, error } = await supabase
+        .from("dept_agent")
+        .select(`
+          dept_id,
+          department:dept_id (
+            dept_id,
+            dept_name,
+            dept_is_active
+          )
+        `)
+        .eq("sys_user_id", sysUserId);
+
+      if (error) {
+        console.error("Error fetching user departments:", error.message);
+        return [];
+      }
+
+      // Filter out null departments and only return active departments
+      const departments = (deptAgents || [])
+        .filter(da => da.department && da.department.dept_is_active)
+        .map(da => ({
+          dept_id: da.department.dept_id,
+          dept_name: da.department.dept_name
+        }));
+
+      return departments;
+    } catch (error) {
+      console.error("Exception fetching user departments:", error.message);
+      return [];
+    }
+  }
+
+  /**
    * Check if user has a specific permission
    */
   async checkUserPermission(sysUserId, permissionName) {

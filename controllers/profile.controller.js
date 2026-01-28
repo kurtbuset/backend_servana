@@ -97,12 +97,16 @@ class ProfileController {
         console.warn("⚠️ User has no role_id assigned");
       }
 
+      // Fetch user departments
+      const departments = await profileService.fetchUserDepartments(sysUserId);
+
       const responseData = {
         sys_user_id: userRow.sys_user_id,
         sys_user_email: userRow.sys_user_email,
         role_id: userRow.role_id,
         role_name: userRow.role?.role_name || null,
         privilege: privileges, // Add privileges to the response
+        departments: departments, // Add departments to the response
         profile: profRow,
         image,
       };

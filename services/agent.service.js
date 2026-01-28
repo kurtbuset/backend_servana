@@ -10,7 +10,7 @@ const ROLE_NAMES = {
 
 class AgentService {
   /**
-   * Get all agents with their departments
+   * Get all agents with their departments and profile pictures
    */
   async getAllAgents() {
     try {
@@ -26,14 +26,15 @@ class AgentService {
         throw new Error("Agent role not found");
       }
 
-      // Get all users with agent role
+      // Get all users with agent role including profile
       const { data: users, error: userError } = await supabase
         .from("sys_user")
         .select(`
           sys_user_id,
           sys_user_email,
           sys_user_is_active,
-          role_id
+          role_id,
+          prof_id
         `)
         .eq("role_id", agentRole.role_id)
         .order("sys_user_email", { ascending: true });
@@ -64,6 +65,25 @@ class AgentService {
         // Don't throw error, just continue without departments
       }
 
+      // Get profile pictures for users with prof_id
+      const profileIds = users.filter(u => u.prof_id).map(u => u.prof_id);
+      let profileImages = {};
+      
+      if (profileIds.length > 0) {
+        const { data: images, error: imageError } = await supabase
+          .from("image")
+          .select("prof_id, img_location, img_is_current, img_created_at")
+          .in("prof_id", profileIds)
+          .eq("img_is_current", true);
+
+        if (!imageError && images) {
+          // Create a map of prof_id to image location
+          images.forEach(img => {
+            profileImages[img.prof_id] = img.img_location;
+          });
+        }
+      }
+
       // Format the response
       const formattedAgents = users.map((user) => {
         const userDepartments = userDepts 
@@ -78,6 +98,7 @@ class AgentService {
           email: user.sys_user_email,
           active: user.sys_user_is_active,
           departments: userDepartments,
+          profile_picture: user.prof_id ? profileImages[user.prof_id] : null,
         };
       });
 

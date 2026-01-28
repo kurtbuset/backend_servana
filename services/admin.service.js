@@ -27,12 +27,38 @@ class AdminService {
 
     const { data, error } = await supabase
       .from("sys_user")
-      .select("sys_user_id, sys_user_email, sys_user_is_active, supabase_user_id")
+      .select("sys_user_id, sys_user_email, sys_user_is_active, supabase_user_id, prof_id")
       .eq("role_id", adminRoleId)
       .order("sys_user_email", { ascending: true });
 
     if (error) throw error;
-    return data;
+
+    // Fetch profile pictures for all admins
+    const adminsWithPictures = await Promise.all(
+      data.map(async (admin) => {
+        let profile_picture = "profile_picture/DefaultProfile.jpg";
+
+        if (admin.prof_id) {
+          const { data: imageData } = await supabase
+            .from("image")
+            .select("img_location")
+            .eq("prof_id", admin.prof_id)
+            .eq("img_is_current", true)
+            .single();
+
+          if (imageData?.img_location) {
+            profile_picture = imageData.img_location;
+          }
+        }
+
+        return {
+          ...admin,
+          profile_picture,
+        };
+      })
+    );
+
+    return adminsWithPictures;
   }
 
   /**

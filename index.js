@@ -113,6 +113,23 @@ io.on('connection', (socket) => {
     console.log(`Socket ${socket.id} joined chat_group ${groupId}`);
   });
 
+  // Handle typing event
+  socket.on('typing', (data) => {
+    const { chat_group_id, userName, userId } = data;
+    // Broadcast to all users in the chat group except sender
+    socket.to(chat_group_id).emit('userTyping', {
+      userName: userName || 'Someone',
+      userId,
+      isCurrentUser: false,
+    });
+  });
+
+  // Handle stop typing event
+  socket.on('stopTyping', (data) => {
+    const { chat_group_id } = data;
+    socket.to(chat_group_id).emit('userStoppedTyping');
+  });
+
   // Handle message from web (agent)
   socket.on('sendMessage', async (messageData) => {
     console.log('Message from web agent:', messageData);
