@@ -45,13 +45,17 @@ class MobileMessageController {
   }
 
   /**
-   * Get messages by chat group ID
+   * Get messages by chat group ID with pagination
    */
   async getMessagesByGroupId(req, res) {
     try {
       const { id } = req.params;
+      const { before, limit = 10 } = req.query;
 
-      const data = await mobileMessageService.getMessagesByGroupId(id);
+      // Validate limit parameter
+      const messageLimit = Math.min(Math.max(parseInt(limit) || 10, 1), 50); // Between 1-50 messages
+
+      const data = await mobileMessageService.getMessagesByGroupId(id, before, messageLimit);
 
       res.json(data);
     } catch (err) {
