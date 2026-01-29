@@ -194,15 +194,17 @@ class ProfileService {
   }
 
   /**
-   * Fetch user departments
+   * Fetch user departments from sys_user_department table
    */
   async fetchUserDepartments(sysUserId) {
     try {
-      const { data: deptAgents, error } = await supabase
-        .from("dept_agent")
+      console.log(`🔍 Fetching departments for user ID: ${sysUserId}`);
+      
+      const { data: userDepartments, error } = await supabase
+        .from("sys_user_department")
         .select(`
           dept_id,
-          department:dept_id (
+          department (
             dept_id,
             dept_name,
             dept_is_active
@@ -210,22 +212,35 @@ class ProfileService {
         `)
         .eq("sys_user_id", sysUserId);
 
+      console.log(`🔍 Raw query result:`, { userDepartments, error });
+
       if (error) {
-        console.error("Error fetching user departments:", error.message);
+        console.error("❌ Error fetching user departments:", error.message);
+        console.error("❌ Error details:", error);
+        return [];
+      }
+
+      if (!userDepartments || userDepartments.length === 0) {
+        console.log(`⚠️ No departments found for user ${sysUserId}`);
         return [];
       }
 
       // Filter out null departments and only return active departments
-      const departments = (deptAgents || [])
-        .filter(da => da.department && da.department.dept_is_active)
-        .map(da => ({
-          dept_id: da.department.dept_id,
-          dept_name: da.department.dept_name
+      const departments = (userDepartments || [])
+        .filter(ud => {
+          console.log(`🔍 Processing department:`, ud);
+          return ud.department && ud.department.dept_is_active;
+        })
+        .map(ud => ({
+          dept_id: ud.department.dept_id,
+          dept_name: ud.department.dept_name
         }));
 
+      console.log(`✅ Fetched ${departments.length} departments for user ${sysUserId}:`, departments);
       return departments;
     } catch (error) {
-      console.error("Exception fetching user departments:", error.message);
+      console.error("❌ Exception fetching user departments:", error.message);
+      console.error("❌ Stack trace:", error.stack);
       return [];
     }
   }
