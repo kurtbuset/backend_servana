@@ -146,29 +146,48 @@ io.on('connection', (socket) => {
     if (socket.chatGroupId) {
       socket.leave(String(socket.chatGroupId));
       
+      // Use fallback values to avoid "undefined undefined"
+      const userType = socket.userType || 'agent';
+      const userId = socket.userId || 'unknown';
+      
       // Notify room that agent left
       socket.to(String(socket.chatGroupId)).emit('userLeft', {
-        userType: socket.userType,
-        userId: socket.userId,
+        userType: userType,
+        userId: userId,
         chatGroupId: socket.chatGroupId
       });
       
-      console.log(`${socket.userType} ${socket.userId} left chat_group ${socket.chatGroupId}`);
+      console.log(`${userType} ${userId} left chat_group ${socket.chatGroupId}`);
     }
   });
 
   // Handle specific room leaving
-  socket.on('leaveRoom', (roomId) => {
+  socket.on('leaveRoom', (data) => {
+    // Handle both old format (just roomId) and new format (object with roomId, userType, userId)
+    let roomId, userType, userId;
+    
+    if (typeof data === 'object' && data.roomId) {
+      // New format: { roomId, userType, userId }
+      roomId = data.roomId;
+      userType = data.userType || socket.userType || 'unknown';
+      userId = data.userId || socket.userId || 'unknown';
+    } else {
+      // Old format: just roomId string/number
+      roomId = data;
+      userType = socket.userType || 'unknown';
+      userId = socket.userId || 'unknown';
+    }
+    
     socket.leave(String(roomId));
     
-    // Notify room that user left
+    // Notify room that user left with proper user info
     socket.to(String(roomId)).emit('userLeft', {
-      userType: socket.userType,
-      userId: socket.userId,
+      userType: userType,
+      userId: userId,
       chatGroupId: roomId
     });
     
-    console.log(`${socket.userType} ${socket.userId} left chat_group ${roomId}`);
+    console.log(`${userType} ${userId} left chat_group ${roomId}`);
   });
 
   // Handle typing event
