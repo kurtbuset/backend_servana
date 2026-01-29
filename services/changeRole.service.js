@@ -2,7 +2,7 @@ const supabase = require("../helpers/supabaseClient");
 
 class ChangeRoleService {
   /**
-   * Get all users with their roles
+   * Get all users with their roles and profile pictures
    */
   async getAllUsersWithRoles() {
     const { data: users, error: userError } = await supabase
@@ -11,7 +11,8 @@ class ChangeRoleService {
         sys_user_id,
         sys_user_email,
         sys_user_is_active,
-        role_id
+        role_id,
+        prof_id
       `)
       .order("sys_user_email", { ascending: true });
 
@@ -25,12 +26,32 @@ class ChangeRoleService {
 
     if (roleError) throw roleError;
 
+    // Get profile pictures for users with prof_id
+    const profileIds = users.filter(u => u.prof_id).map(u => u.prof_id);
+    let profileImages = {};
+    
+    if (profileIds.length > 0) {
+      const { data: images, error: imageError } = await supabase
+        .from("image")
+        .select("prof_id, img_location, img_is_current")
+        .in("prof_id", profileIds)
+        .eq("img_is_current", true);
+
+      if (!imageError && images) {
+        // Create a map of prof_id to image location
+        images.forEach(img => {
+          profileImages[img.prof_id] = img.img_location;
+        });
+      }
+    }
+
     // Combine the data
     const response = users.map((user) => ({
       sys_user_id: user.sys_user_id,
       sys_user_email: user.sys_user_email,
       sys_user_is_active: user.sys_user_is_active,
       role_id: user.role_id,
+      profile_picture: user.prof_id ? profileImages[user.prof_id] : null,
       all_roles: roles,
     }));
 
