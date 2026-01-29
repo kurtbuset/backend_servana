@@ -20,6 +20,9 @@ class DepartmentController {
     // Toggle dept_is_active status
     router.put("/:id/toggle", (req, res) => this.toggleDepartmentStatus(req, res));
 
+    // Get members of a department
+    router.get("/:id/members", (req, res) => this.getDepartmentMembers(req, res));
+
     return router;
   }
   /**
@@ -99,6 +102,24 @@ class DepartmentController {
     } catch (err) {
       console.error("Error toggling department active status:", err.message);
       res.status(500).json({ error: "Failed to toggle department status" });
+    }
+  }
+
+  /**
+   * Get all members of a department from sys_user_department table
+   */
+  async getDepartmentMembers(req, res) {
+    try {
+      const { id } = req.params;
+      console.log(`🔍 Fetching members for department ID: ${id}`);
+
+      const members = await departmentService.getDepartmentMembers(id);
+      console.log(`✅ Found ${members.length} members for department ${id}`);
+
+      res.status(200).json({ members });
+    } catch (err) {
+      console.error("Error fetching department members:", err.message);
+      res.status(500).json({ error: "Failed to fetch department members" });
     }
   }
 }

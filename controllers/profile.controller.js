@@ -99,6 +99,7 @@ class ProfileController {
 
       // Fetch user departments
       const departments = await profileService.fetchUserDepartments(sysUserId);
+      console.log(`🔍 Profile Controller - Departments fetched:`, departments);
 
       const responseData = {
         sys_user_id: userRow.sys_user_id,
@@ -111,14 +112,15 @@ class ProfileController {
         image,
       };
 
-      // console.log("🔍 Profile Controller - Sending response:", {
-      //   user_id: responseData.sys_user_id,
-      //   role_id: responseData.role_id,
-      //   role_name: responseData.role_name,
-      //   has_privileges: !!responseData.privilege,
-      //   privilege_keys: responseData.privilege ? Object.keys(responseData.privilege) : [],
-      //   has_profile: !!profRow?.prof_id
-      // });
+      console.log("🔍 Profile Controller - Full response data:", {
+        user_id: responseData.sys_user_id,
+        role_id: responseData.role_id,
+        role_name: responseData.role_name,
+        has_privileges: !!responseData.privilege,
+        departments_count: responseData.departments?.length || 0,
+        departments: responseData.departments,
+        has_profile: !!profRow?.prof_id
+      });
 
       res.json(responseData);
     } catch (err) {
