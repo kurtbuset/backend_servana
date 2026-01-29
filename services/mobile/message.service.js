@@ -22,17 +22,39 @@ class MobileMessageService {
   }
 
   /**
-   * Get messages by chat group ID
+   * Get messages by chat group ID with pagination
+   * @param {number} chatGroupId - The chat group ID
+   * @param {string} before - ISO timestamp for pagination (optional)
+   * @param {number} limit - Number of messages to fetch (default: 10)
+   * @returns {Promise<Object>} Object containing messages array and pagination info
    */
-  async getMessagesByGroupId(chatGroupId) {
-    const { data, error } = await supabase
+  async getMessagesByGroupId(chatGroupId, before = null, limit = 10) {
+    let query = supabase
       .from("chat")
       .select("*")
       .eq("chat_group_id", chatGroupId)
-      .order("chat_created_at", { ascending: true });
+      .order("chat_created_at", { ascending: false }) // Get newest first for pagination
+      .limit(limit);
+
+    // Add pagination filter if 'before' timestamp is provided
+    if (before) {
+      query = query.lt("chat_created_at", before);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
-    return data;
+
+    // Reverse the array to show oldest messages first in UI
+    const messages = data.reverse();
+
+    return {
+      messages,
+      hasMore: data.length === limit, // If we got the full limit, there might be more
+      count: messages.length,
+      oldestTimestamp: messages.length > 0 ? messages[0].chat_created_at : null,
+      newestTimestamp: messages.length > 0 ? messages[messages.length - 1].chat_created_at : null
+    };
   }
 
   /**
