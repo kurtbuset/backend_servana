@@ -1,4 +1,5 @@
 const express = require('express');
+const helmet = require('helmet')
 const cors = require('cors');
 const cookieParser = require('cookie-parser'); // ✅ Required for HTTP-only cookies
 require('dotenv').config();
@@ -20,6 +21,7 @@ const mobileMessageController = require("./controllers/mobile/message.controller
 const roleService = require('./services/role.service');
 
 const app = express();
+app.use(helmet())
 const http = require('http');
 const socketIo = require('socket.io');
 const port = process.env.PORT || 3000;
@@ -27,7 +29,7 @@ const port = process.env.PORT || 3000;
 // ✅ Middleware
 app.use(express.static("public"));
 
-// Dynamic allowed origins from environment variables
+// Dynamic allowed origins from environment variables 
 const allowedOrigins = [
   process.env.REACT_WEB_URL || 'http://localhost:5173', // Development React web
   process.env.REACT_WEB_PRODUCTION_URL, // Production React web
@@ -103,6 +105,30 @@ const io = socketIo(server, {
     credentials: true,
   }
 });
+
+// Make io instance available to routes
+app.set('io', io);
+
+// Optional: Log room statistics periodically
+setInterval(() => {
+  const rooms = io.sockets.adapter.rooms;
+  const activeRooms = [];
+  
+  rooms.forEach((sockets, roomName) => {
+    // Skip default socket rooms (socket IDs)
+    if (!sockets.has(roomName)) {
+      activeRooms.push({
+        room: roomName,
+        users: sockets.size
+      });
+    }
+  });
+
+  if (activeRooms.length > 0) {
+    console.log(`📊 Active Rooms: ${activeRooms.length}, Total Users: ${io.sockets.sockets.size}`);
+    console.log('Room Details:', activeRooms);
+  }
+}, 30000); // Log every 30 seconds
 
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
@@ -260,6 +286,42 @@ io.on('connection', (socket) => {
       });
     }
   });
+
+  // Add room statistics endpoint (for debugging/monitoring)
+  // socket.on('getRoomStats', () => {
+  //   const rooms = io.sockets.adapter.rooms;
+  //   const roomStats = {
+  //     totalRooms: rooms.size,
+  //     activeRooms: [],
+  //     totalConnectedUsers: io.sockets.sockets.size
+  //   };
+
+  //   rooms.forEach((sockets, roomName) => {
+  //     // Skip default socket rooms (socket IDs)
+  //     if (!sockets.has(roomName)) {
+  //       const roomUsers = [];
+  //       sockets.forEach(socketId => {
+  //         const roomSocket = io.sockets.sockets.get(socketId);
+  //         if (roomSocket && roomSocket.userType) {
+  //           roomUsers.push({
+  //             socketId: socketId,
+  //             userType: roomSocket.userType,
+  //             userId: roomSocket.userId
+  //           });
+  //         }
+  //       });
+
+  //       roomStats.activeRooms.push({
+  //         roomName: roomName,
+  //         userCount: sockets.size,
+  //         users: roomUsers
+  //       });
+  //     }
+  //   });
+
+  //   socket.emit('roomStatsResponse', roomStats);
+  //   console.log('📊 Room Statistics:', roomStats);
+  // });
 });
 
 server.listen(port, () => {

@@ -236,7 +236,7 @@ class ProfileService {
           dept_name: ud.department.dept_name
         }));
 
-      console.log(`✅ Fetched ${departments.length} departments for user ${sysUserId}:`, departments);
+      // console.log(`✅ Fetched ${departments.length} departments for user ${sysUserId}:`, departments);
       return departments;
     } catch (error) {
       console.error("❌ Exception fetching user departments:", error.message);
