@@ -110,10 +110,10 @@ class DepartmentService {
         .map(async (ud) => {
           const userId = ud.sys_user.sys_user_id;
 
-          // First get the sys_user to get prof_id
+          // First get the sys_user to get prof_id and last_seen
           const { data: userWithProf } = await supabase
             .from("sys_user")
-            .select("prof_id")
+            .select("prof_id, last_seen")
             .eq("sys_user_id", userId)
             .single();
 
@@ -134,7 +134,7 @@ class DepartmentService {
             // Fetch current image using prof_id
             const { data: imageData } = await supabase
               .from("image")
-              .select("*")
+              .select("img_id, img_location, img_is_current")
               .eq("prof_id", userWithProf.prof_id)
               .eq("img_is_current", true)
               .single();
@@ -142,7 +142,25 @@ class DepartmentService {
             image = imageData;
           }
 
-          console.log(`👤 User ${userId} - Profile:`, profile ? `${profile.prof_firstname} ${profile.prof_lastname}` : 'Not found', '| Image:', image ? image.img_location : 'Not found');
+          // Fetch all departments for this user
+          const { data: userDepts } = await supabase
+            .from("sys_user_department")
+            .select(`
+              dept_id,
+              department (
+                dept_id,
+                dept_name
+              )
+            `)
+            .eq("sys_user_id", userId);
+
+          const departments = userDepts?.map(ud => ud.department).filter(Boolean) || [];
+
+          console.log(`👤 User ${userId}:`, {
+            profile: profile ? `${profile.prof_firstname} ${profile.prof_lastname}` : 'Not found',
+            image: image ? { img_id: image.img_id, img_location: image.img_location } : 'Not found',
+            departments: departments.map(d => d.dept_name).join(', ')
+          });
 
           return {
             sys_user_id: ud.sys_user.sys_user_id,
@@ -150,7 +168,9 @@ class DepartmentService {
             sys_user_is_active: ud.sys_user.sys_user_is_active,
             role: ud.sys_user.role,
             profile: profile || null,
-            image: image || null
+            image: image || null,
+            last_seen: userWithProf?.last_seen || null,
+            departments: departments
           };
         });
 

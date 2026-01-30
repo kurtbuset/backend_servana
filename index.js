@@ -104,8 +104,149 @@ const io = socketIo(server, {
   }
 });
 
+// Store online users: { userId: { socketId, lastSeen, userType } }
+const onlineUsers = new Map();
+
+// Cleanup job: Check for stale users every 60 seconds
+setInterval(() => {
+  const now = new Date();
+  const staleThreshold = 60000; // 60 seconds (2x heartbeat interval)
+  
+  onlineUsers.forEach((userData, userId) => {
+    const timeSinceLastSeen = now - userData.lastSeen;
+    
+    if (timeSinceLastSeen > staleThreshold) {
+      console.log(`🧹 Cleaning up stale user ${userId} (last seen ${Math.floor(timeSinceLastSeen / 1000)}s ago)`);
+      
+      // Remove from online users
+      onlineUsers.delete(userId);
+      
+      // Broadcast offline status
+      io.emit('userStatusChanged', {
+        userId,
+        status: 'offline',
+        lastSeen: userData.lastSeen
+      });
+      
+      // Update database
+      const supabase = require('./helpers/supabaseClient');
+      supabase
+        .from('sys_user')
+        .update({ last_seen: userData.lastSeen.toISOString() })
+        .eq('sys_user_id', userId)
+        .then(() => console.log(`💾 Updated stale user ${userId} in database`))
+        .catch(err => console.error('❌ Error updating stale user:', err));
+    }
+  });
+}, 60000); // Run every 60 seconds
+
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
+  
+  // Handle user coming online
+  socket.on('userOnline', async (data) => {
+    const { userId, userType, userName } = data;
+    
+    console.log('🟢 userOnline event received:', { userId, userType, userName, socketId: socket.id });
+    
+    // Store user as online
+    onlineUsers.set(userId, {
+      socketId: socket.id,
+      lastSeen: new Date(),
+      userType,
+      userName
+    });
+    
+    socket.userId = userId;
+    socket.userType = userType;
+    
+    console.log(`✅ User ${userId} (${userName}) is now online. Total online: ${onlineUsers.size}`);
+    
+    // Broadcast to all clients that this user is online
+    io.emit('userStatusChanged', {
+      userId,
+      status: 'online',
+      lastSeen: new Date()
+    });
+    
+    console.log('📡 Broadcasted userStatusChanged to all clients');
+    
+    // Update last_seen in database
+    try {
+      const supabase = require('./helpers/supabaseClient');
+      await supabase
+        .from('sys_user')
+        .update({ last_seen: new Date().toISOString() })
+        .eq('sys_user_id', userId);
+      console.log('💾 Updated last_seen in database for user:', userId);
+    } catch (error) {
+      console.error('❌ Error updating last_seen:', error);
+    }
+  });
+  
+  // Handle heartbeat to keep user online
+  socket.on('userHeartbeat', async (data) => {
+    const { userId } = data;
+    
+    if (onlineUsers.has(userId)) {
+      // Update last seen timestamp
+      const userData = onlineUsers.get(userId);
+      const lastSeen = new Date();
+      userData.lastSeen = lastSeen;
+      onlineUsers.set(userId, userData);
+      
+      console.log(`💓 Heartbeat from user ${userId}`);
+      
+      // Broadcast status update to all clients (so they see user is online immediately)
+      io.emit('userStatusChanged', {
+        userId,
+        status: 'online',
+        lastSeen
+      });
+      
+      // Update database
+      try {
+        const supabase = require('./helpers/supabaseClient');
+        await supabase
+          .from('sys_user')
+          .update({ last_seen: lastSeen.toISOString() })
+          .eq('sys_user_id', userId);
+      } catch (error) {
+        console.error('❌ Error updating heartbeat:', error);
+      }
+    }
+  });
+  
+  // Handle user going offline
+  socket.on('userOffline', async (data) => {
+    const { userId } = data;
+    
+    if (onlineUsers.has(userId)) {
+      onlineUsers.delete(userId);
+      
+      const lastSeen = new Date();
+      
+      console.log(`❌ User ${userId} went offline`);
+      
+      // Broadcast to all clients that this user is offline
+      io.emit('userStatusChanged', {
+        userId,
+        status: 'offline',
+        lastSeen
+      });
+      
+      // Update last_seen in database
+      try {
+        const supabase = require('./helpers/supabaseClient');
+        await supabase
+          .from('sys_user')
+          .update({ last_seen: lastSeen.toISOString() })
+          .eq('sys_user_id', userId);
+      } catch (error) {
+        console.error('Error updating last_seen:', error);
+      }
+    }
+  });
   
   // Join a chat group room - with room switching support
   socket.on('joinChatGroup', (data) => {
@@ -248,8 +389,10 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     console.log(`❌ Client disconnected: ${socket.id}`);
+    console.log(`   Socket userId: ${socket.userId}`);
+    console.log(`   Socket userType: ${socket.userType}`);
     
     // Notify room members about user leaving
     if (socket.chatGroupId && socket.userType) {
@@ -259,6 +402,63 @@ io.on('connection', (socket) => {
         chatGroupId: socket.chatGroupId
       });
     }
+    
+    // Handle user going offline on disconnect
+    if (socket.userId) {
+      const userId = socket.userId;
+      
+      if (onlineUsers.has(userId)) {
+        const userData = onlineUsers.get(userId);
+        
+        // Only remove if this socket ID matches
+        if (userData.socketId === socket.id) {
+          onlineUsers.delete(userId);
+          
+          const lastSeen = new Date();
+          
+          console.log(`❌ User ${userId} went offline (disconnected) - Socket ${socket.id}`);
+          
+          // Broadcast to all clients that this user is offline
+          io.emit('userStatusChanged', {
+            userId,
+            status: 'offline',
+            lastSeen
+          });
+          
+          // Update last_seen in database
+          try {
+            const supabase = require('./helpers/supabaseClient');
+            await supabase
+              .from('sys_user')
+              .update({ last_seen: lastSeen.toISOString() })
+              .eq('sys_user_id', userId);
+          } catch (error) {
+            console.error('Error updating last_seen:', error);
+          }
+        } else {
+          console.log(`⚠️ Socket ${socket.id} disconnected but user ${userId} has different active socket ${userData.socketId}`);
+        }
+      } else {
+        console.log(`⚠️ User ${userId} not found in onlineUsers Map`);
+      }
+    } else {
+      console.log(`⚠️ Socket ${socket.id} disconnected without userId`);
+    }
+  });
+  
+  // Get online users list
+  socket.on('getOnlineUsers', () => {
+    const onlineUsersList = Array.from(onlineUsers.entries()).map(([userId, data]) => ({
+      userId,
+      status: 'online',
+      lastSeen: data.lastSeen,
+      userType: data.userType,
+      userName: data.userName
+    }));
+    
+    console.log(`📋 getOnlineUsers request from ${socket.id}. Sending ${onlineUsersList.length} users`);
+    
+    socket.emit('onlineUsersList', onlineUsersList);
   });
 });
 
