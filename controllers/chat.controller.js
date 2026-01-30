@@ -20,6 +20,9 @@ class ChatController {
     // Get chat messages for a specific client
     router.get("/:clientId", (req, res) => this.getChatMessages(req, res));
 
+    // Get room statistics (for monitoring)
+    router.get("/admin/room-stats", (req, res) => this.getRoomStats(req, res));
+
     return router;
   }
   /**
@@ -182,8 +185,56 @@ class ChatController {
   }
 
   /**
-   * Handle sending a message via WebSocket
+   * Get room statistics for monitoring
    */
+  getRoomStats(req, res) {
+    try {
+      // Access the io instance (you'll need to pass it to the controller)
+      const io = req.app.get('io');
+      const rooms = io.sockets.adapter.rooms;
+      
+      const roomStats = {
+        totalRooms: rooms.size,
+        activeRooms: [],
+        totalConnectedUsers: io.sockets.sockets.size,
+        timestamp: new Date().toISOString()
+      };
+
+      rooms.forEach((sockets, roomName) => {
+        // Skip default socket rooms (socket IDs)
+        if (!sockets.has(roomName)) {
+          const roomUsers = [];
+          sockets.forEach(socketId => {
+            const roomSocket = io.sockets.sockets.get(socketId);
+            if (roomSocket && roomSocket.userType) {
+              roomUsers.push({
+                socketId: socketId,
+                userType: roomSocket.userType,
+                userId: roomSocket.userId
+              });
+            }
+          });
+
+          roomStats.activeRooms.push({
+            roomName: roomName,
+            userCount: sockets.size,
+            users: roomUsers,
+            hasAgent: roomUsers.some(u => u.userType === 'agent'),
+            hasClient: roomUsers.some(u => u.userType === 'client'),
+            isRealTime: roomUsers.some(u => u.userType === 'agent') && roomUsers.some(u => u.userType === 'client')
+          });
+        }
+      });
+
+      // Sort rooms by user count (most active first)
+      roomStats.activeRooms.sort((a, b) => b.userCount - a.userCount);
+
+      res.json(roomStats);
+    } catch (err) {
+      console.error("❌ Error getting room stats:", err.message);
+      res.status(500).json({ error: "Failed to get room statistics" });
+    }
+  }
   async handleSendMessage(rawMessage, io, socket) {
     try {
       // Validate that sys_user_id is provided from frontend
@@ -204,9 +255,6 @@ class ChatController {
       const insertedMessage = await chatService.insertMessage(message);
 
       if (insertedMessage) {
-        // Emit update to refresh chat groups list
-        io.emit("updateChatGroups");
-
         // Return the inserted message for socket handler to broadcast
         return insertedMessage;
       }
