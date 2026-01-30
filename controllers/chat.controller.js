@@ -237,29 +237,43 @@ class ChatController {
   }
   async handleSendMessage(rawMessage, io, socket) {
     try {
-      // Validate that sys_user_id is provided from frontend
-      if (!rawMessage.sys_user_id) {
-        throw new Error("sys_user_id is required");
+      // Validate message structure - must have either sys_user_id (agent) or client_id (client)
+      const isAgent = rawMessage.sys_user_id && !rawMessage.client_id;
+      const isClient = rawMessage.client_id && !rawMessage.sys_user_id;
+      
+      if (!isAgent && !isClient) {
+        throw new Error("Message must have either sys_user_id (agent) or client_id (client)");
+      }
+      
+      if (!rawMessage.chat_body || !rawMessage.chat_group_id) {
+        throw new Error("chat_body and chat_group_id are required");
       }
 
-      // Use the sys_user_id from frontend (which comes from fresh login session)
-      // instead of socket authentication (which may be stale after logout/login)
+      // Prepare message for database insertion
       const message = {
-        ...rawMessage,
-        sys_user_id: rawMessage.sys_user_id, // Trust the frontend's authenticated user ID
+        chat_body: rawMessage.chat_body,
+        chat_group_id: rawMessage.chat_group_id,
+        chat_created_at: new Date().toISOString(),
+        // Set either sys_user_id or client_id based on sender type
+        ...(isAgent && { sys_user_id: rawMessage.sys_user_id }),
+        ...(isClient && { client_id: rawMessage.client_id })
       };
 
-      console.log("Saving message to database:", message);
+      console.log(`💾 Saving ${isAgent ? 'agent' : 'client'} message to database:`, {
+        chat_group_id: message.chat_group_id,
+        sender_id: isAgent ? message.sys_user_id : message.client_id,
+        content_length: message.chat_body.length
+      });
 
       // Insert message into database
       const insertedMessage = await chatService.insertMessage(message);
 
       if (insertedMessage) {
-        // Return the inserted message for socket handler to broadcast
+        console.log(`✅ Message saved with ID: ${insertedMessage.chat_id}`);
         return insertedMessage;
       }
 
-      return null;
+      throw new Error("Failed to insert message into database");
     } catch (err) {
       console.error("❌ handleSendMessage error:", err.message);
       throw err;
