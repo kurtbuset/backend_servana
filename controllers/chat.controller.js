@@ -20,6 +20,9 @@ class ChatController {
     // Get chat messages for a specific client
     router.get("/:clientId", (req, res) => this.getChatMessages(req, res));
 
+    // Get room statistics (for monitoring)
+    router.get("/admin/room-stats", (req, res) => this.getRoomStats(req, res));
+
     return router;
   }
   /**
@@ -182,36 +185,95 @@ class ChatController {
   }
 
   /**
-   * Handle sending a message via WebSocket
+   * Get room statistics for monitoring
    */
-  async handleSendMessage(rawMessage, io, socket) {
+  getRoomStats(req, res) {
     try {
-      // Validate that sys_user_id is provided from frontend
-      if (!rawMessage.sys_user_id) {
-        throw new Error("sys_user_id is required");
-      }
-
-      // Use the sys_user_id from frontend (which comes from fresh login session)
-      // instead of socket authentication (which may be stale after logout/login)
-      const message = {
-        ...rawMessage,
-        sys_user_id: rawMessage.sys_user_id, // Trust the frontend's authenticated user ID
+      // Access the io instance (you'll need to pass it to the controller)
+      const io = req.app.get('io');
+      const rooms = io.sockets.adapter.rooms;
+      
+      const roomStats = {
+        totalRooms: rooms.size,
+        activeRooms: [],
+        totalConnectedUsers: io.sockets.sockets.size,
+        timestamp: new Date().toISOString()
       };
 
-      console.log("Saving message to database:", message);
+      rooms.forEach((sockets, roomName) => {
+        // Skip default socket rooms (socket IDs)
+        if (!sockets.has(roomName)) {
+          const roomUsers = [];
+          sockets.forEach(socketId => {
+            const roomSocket = io.sockets.sockets.get(socketId);
+            if (roomSocket && roomSocket.userType) {
+              roomUsers.push({
+                socketId: socketId,
+                userType: roomSocket.userType,
+                userId: roomSocket.userId
+              });
+            }
+          });
+
+          roomStats.activeRooms.push({
+            roomName: roomName,
+            userCount: sockets.size,
+            users: roomUsers,
+            hasAgent: roomUsers.some(u => u.userType === 'agent'),
+            hasClient: roomUsers.some(u => u.userType === 'client'),
+            isRealTime: roomUsers.some(u => u.userType === 'agent') && roomUsers.some(u => u.userType === 'client')
+          });
+        }
+      });
+
+      // Sort rooms by user count (most active first)
+      roomStats.activeRooms.sort((a, b) => b.userCount - a.userCount);
+
+      res.json(roomStats);
+    } catch (err) {
+      console.error("❌ Error getting room stats:", err.message);
+      res.status(500).json({ error: "Failed to get room statistics" });
+    }
+  }
+  async handleSendMessage(rawMessage, io, socket) {
+    try {
+      // Validate message structure - must have either sys_user_id (agent) or client_id (client)
+      const isAgent = rawMessage.sys_user_id && !rawMessage.client_id;
+      const isClient = rawMessage.client_id && !rawMessage.sys_user_id;
+      
+      if (!isAgent && !isClient) {
+        throw new Error("Message must have either sys_user_id (agent) or client_id (client)");
+      }
+      
+      if (!rawMessage.chat_body || !rawMessage.chat_group_id) {
+        throw new Error("chat_body and chat_group_id are required");
+      }
+
+      // Prepare message for database insertion
+      const message = {
+        chat_body: rawMessage.chat_body,
+        chat_group_id: rawMessage.chat_group_id,
+        chat_created_at: new Date().toISOString(),
+        // Set either sys_user_id or client_id based on sender type
+        ...(isAgent && { sys_user_id: rawMessage.sys_user_id }),
+        ...(isClient && { client_id: rawMessage.client_id })
+      };
+
+      console.log(`💾 Saving ${isAgent ? 'agent' : 'client'} message to database:`, {
+        chat_group_id: message.chat_group_id,
+        sender_id: isAgent ? message.sys_user_id : message.client_id,
+        content_length: message.chat_body.length
+      });
 
       // Insert message into database
       const insertedMessage = await chatService.insertMessage(message);
 
       if (insertedMessage) {
-        // Emit update to refresh chat groups list
-        io.emit("updateChatGroups");
-
-        // Return the inserted message for socket handler to broadcast
+        console.log(`✅ Message saved with ID: ${insertedMessage.chat_id}`);
         return insertedMessage;
       }
 
-      return null;
+      throw new Error("Failed to insert message into database");
     } catch (err) {
       console.error("❌ handleSendMessage error:", err.message);
       throw err;

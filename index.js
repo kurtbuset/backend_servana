@@ -1,8 +1,10 @@
 const express = require('express');
+const helmet = require('helmet')
 const cors = require('cors');
 const cookieParser = require('cookie-parser'); // ✅ Required for HTTP-only cookies
 require('dotenv').config();
 
+// Controllers
 const departmentController = require('./controllers/department.controller');   
 const adminController = require('./controllers/admin.controller');
 const autoReplyController = require('./controllers/autoReply.controller');
@@ -20,6 +22,7 @@ const mobileMessageController = require("./controllers/mobile/message.controller
 const roleService = require('./services/role.service');
 
 const app = express();
+app.use(helmet())
 const http = require('http');
 const socketIo = require('socket.io');
 const port = process.env.PORT || 3000;
@@ -27,7 +30,7 @@ const port = process.env.PORT || 3000;
 // ✅ Middleware
 app.use(express.static("public"));
 
-// Dynamic allowed origins from environment variables
+// Dynamic allowed origins from environment variables 
 const allowedOrigins = [
   process.env.REACT_WEB_URL || 'http://localhost:5173', // Development React web
   process.env.REACT_WEB_PRODUCTION_URL, // Production React web
@@ -139,9 +142,32 @@ setInterval(() => {
     }
   });
 }, 60000); // Run every 60 seconds
+// Make io instance available to routes
+app.set('io', io);
+
+// Optional: Log room statistics periodically
+setInterval(() => {
+  const rooms = io.sockets.adapter.rooms;
+  const activeRooms = [];
+  
+  rooms.forEach((sockets, roomName) => {
+    // Skip default socket rooms (socket IDs)
+    if (!sockets.has(roomName)) {
+      activeRooms.push({
+        room: roomName,
+        users: sockets.size
+      });
+    }
+  });
+
+  if (activeRooms.length > 0) {
+    console.log(`📊 Active Rooms: ${activeRooms.length}, Total Users: ${io.sockets.sockets.size}`);
+    console.log('Room Details:', activeRooms);
+  }
+}, 30000); // Log every 30 seconds
 
 io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`);
+  console.log(`User connected: ${socket.id}`);
   
   // Handle user coming online
   socket.on('userOnline', async (data) => {
@@ -348,44 +374,57 @@ io.on('connection', (socket) => {
     socket.to(chat_group_id).emit('userStoppedTyping');
   });
 
-  // Handle message from web (agent)
+  // Unified message handler for both agent and client
   socket.on('sendMessage', async (messageData) => {
-    console.log('Message from web agent:', messageData);
-    
-    try {
-      // Save message to database via controller
-      const savedMessage = await chatController.handleSendMessage(messageData, io, socket);
-      
-      if (savedMessage) {
-        const roomId = String(messageData.chat_group_id);
-        
-        // Always broadcast to the chat_group room - real-time if client is in same room
-        io.to(roomId).emit('receiveMessage', savedMessage);
-        io.to(roomId).emit('newMessage', savedMessage);
-        
-        console.log(`✅ Message broadcasted to chat_group ${messageData.chat_group_id}`);
-      }
-    } catch (error) {
-      console.error('Error handling sendMessage:', error);
-      socket.emit('messageError', { error: 'Failed to send message' });
-    }
-  });
-
-  // Handle message from mobile (client)
-  socket.on('sendMessageMobile', async (messageData) => {
-    console.log('Message from mobile client:', messageData);
-    
     try {
       const roomId = String(messageData.chat_group_id);
       
-      // Always broadcast to the chat_group room - real-time if agent is in same room
-      io.to(roomId).emit('newMessage', messageData);
-      io.to(roomId).emit('receiveMessage', messageData);
+      // Determine sender type and validate message structure
+      const isAgent = messageData.sys_user_id && !messageData.client_id;
+      const isClient = messageData.client_id && !messageData.sys_user_id;
       
-      console.log(`✅ Mobile message broadcasted to chat_group ${messageData.chat_group_id}`);
+      if (!isAgent && !isClient) {
+        throw new Error('Invalid message structure: must have either sys_user_id or client_id');
+      }
+      
+      console.log(`📨 Message from ${isAgent ? 'agent' : 'client'}:`, {
+        chat_group_id: messageData.chat_group_id,
+        sender_id: isAgent ? messageData.sys_user_id : messageData.client_id,
+        content_length: messageData.chat_body?.length || 0
+      });
+      
+      // Save message to database for both agent and client
+      const savedMessage = await chatController.handleSendMessage(messageData, io, socket);
+      
+      if (savedMessage) {
+        // Standardized message format for broadcasting
+        const broadcastMessage = {
+          ...savedMessage,
+          sender_type: isAgent ? 'agent' : 'client',
+          sender_id: isAgent ? messageData.sys_user_id : messageData.client_id
+        };
+        
+        // Single broadcast event for consistency
+        io.to(roomId).emit('receiveMessage', broadcastMessage);
+        
+        // Send delivery confirmation to sender
+        socket.emit('messageDelivered', {
+          chat_id: savedMessage.chat_id,
+          chat_group_id: messageData.chat_group_id,
+          timestamp: savedMessage.chat_created_at,
+          tempId: messageData.tempId // Include tempId for frontend confirmation
+        });
+        
+        console.log(`✅ Message saved and broadcasted to chat_group ${messageData.chat_group_id}`);
+      }
     } catch (error) {
-      console.error('Error handling sendMessageMobile:', error);
-      socket.emit('messageError', { error: 'Failed to send message' });
+      console.error('❌ Error handling sendMessage:', error);
+      socket.emit('messageError', { 
+        error: 'Failed to send message',
+        details: error.message,
+        chat_group_id: messageData.chat_group_id,
+        tempId: messageData.tempId // Include tempId for frontend error handling
+      });
     }
   });
 
@@ -460,6 +499,42 @@ io.on('connection', (socket) => {
     
     socket.emit('onlineUsersList', onlineUsersList);
   });
+
+  // Add room statistics endpoint (for debugging/monitoring)
+  // socket.on('getRoomStats', () => {
+  //   const rooms = io.sockets.adapter.rooms;
+  //   const roomStats = {
+  //     totalRooms: rooms.size,
+  //     activeRooms: [],
+  //     totalConnectedUsers: io.sockets.sockets.size
+  //   };
+
+  //   rooms.forEach((sockets, roomName) => {
+  //     // Skip default socket rooms (socket IDs)
+  //     if (!sockets.has(roomName)) {
+  //       const roomUsers = [];
+  //       sockets.forEach(socketId => {
+  //         const roomSocket = io.sockets.sockets.get(socketId);
+  //         if (roomSocket && roomSocket.userType) {
+  //           roomUsers.push({
+  //             socketId: socketId,
+  //             userType: roomSocket.userType,
+  //             userId: roomSocket.userId
+  //           });
+  //         }
+  //       });
+
+  //       roomStats.activeRooms.push({
+  //         roomName: roomName,
+  //         userCount: sockets.size,
+  //         users: roomUsers
+  //       });
+  //     }
+  //   });
+
+  //   socket.emit('roomStatsResponse', roomStats);
+  //   console.log('📊 Room Statistics:', roomStats);
+  // });
 });
 
 server.listen(port, () => {
