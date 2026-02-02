@@ -1,11 +1,8 @@
 const supabase = require("../../helpers/supabaseClient");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
+const jwtUtils = require("../../src/utils/jwt");
 
-const JWT_SECRET = process.env.JWT_ACCESS_SECRET || "your_jwt_secret_key";
 const OTP_LENGTH = 6;
-const OTP_EXPIRATION_MINUTES = 5;
 
 class ClientAccountService {
   /**
@@ -196,8 +193,9 @@ class ClientAccountService {
    * Generate JWT token
    */
   generateToken(clientId, clientNumber) {
-    return jwt.sign({ client_id: clientId, client_number: clientNumber }, JWT_SECRET, {
-      expiresIn: "7d",
+    return jwtUtils.generateAccessToken({ 
+      client_id: clientId, 
+      client_number: clientNumber 
     });
   }
 
@@ -206,7 +204,7 @@ class ClientAccountService {
    */
   async getOrCreateChatGroup(clientId) {
     // Check if chat group exists
-    const { data: existingGroup, error: groupError } = await supabase
+    const { data: existingGroup } = await supabase
       .from("chat_group")
       .select("chat_group_id")
       .eq("client_id", clientId)

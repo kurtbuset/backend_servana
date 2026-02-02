@@ -1,4 +1,6 @@
 const chatController = require('../controllers/chat.controller');
+const RoomAccess = require('./authorization/roomAccess');
+const MessageAuth = require('./authorization/messageAuth');
 
 /**
  * Socket event handlers for chat functionality
@@ -6,63 +8,97 @@ const chatController = require('../controllers/chat.controller');
 class SocketHandlers {
   constructor(io) {
     this.io = io;
+    this.roomAccess = new RoomAccess();
+    this.messageAuth = new MessageAuth();
   }
 
   /**
    * Handle user joining a chat group
    */
-  handleJoinChatGroup(socket, data) {
-    const { groupId, userType, userId } = data;
-    
-    // Leave previous room if agent was in another room
-    if (socket.chatGroupId && socket.chatGroupId !== groupId) {
-      socket.leave(String(socket.chatGroupId));
+  async handleJoinChatGroup(socket, data) {
+    try {
+      const { groupId, userType, userId } = data;
       
-      // Notify previous room that agent left
-      socket.to(String(socket.chatGroupId)).emit('userLeft', {
-        userType: socket.userType,
-        userId: socket.userId,
-        chatGroupId: socket.chatGroupId
+      // Validate that socket is authenticated
+      if (!socket.isAuthenticated || !socket.user) {
+        socket.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      // Check room access authorization
+      const roomAccess = await this.roomAccess.canJoinRoom(socket.user, groupId);
+      if (!roomAccess.allowed) {
+        socket.emit('error', { 
+          message: 'Access denied', 
+          reason: roomAccess.reason 
+        });
+        return;
+      }
+
+      // Leave previous room if agent was in another room
+      if (socket.chatGroupId && socket.chatGroupId !== groupId) {
+        socket.leave(String(socket.chatGroupId));
+        
+        // Notify previous room that agent left
+        socket.to(String(socket.chatGroupId)).emit('userLeft', {
+          userType: socket.user.userType,
+          userId: socket.user.userId,
+          chatGroupId: socket.chatGroupId
+        });
+        
+        console.log(`${socket.user.userType} ${socket.user.userId} left chat_group ${socket.chatGroupId}`);
+      }
+      
+      // Join new room
+      socket.join(String(groupId));
+      socket.chatGroupId = groupId;
+      
+      console.log(`${socket.user.userType} ${socket.user.userId} joined chat_group ${groupId}`);
+      
+      // Notify new room that user joined
+      socket.to(String(groupId)).emit('userJoined', {
+        userType: socket.user.userType,
+        userId: socket.user.userId,
+        chatGroupId: groupId
       });
-      
-      console.log(`${userType} ${userId} left chat_group ${socket.chatGroupId}`);
+
+      // Send success confirmation
+      socket.emit('joinedRoom', {
+        chatGroupId: groupId,
+        roomInfo: roomAccess.roomInfo
+      });
+    } catch (error) {
+      console.error('❌ Error in handleJoinChatGroup:', error.message);
+      socket.emit('error', { 
+        message: 'Failed to join chat group',
+        details: error.message 
+      });
     }
-    
-    // Join new room
-    socket.join(String(groupId));
-    socket.chatGroupId = groupId;
-    socket.userType = userType;
-    socket.userId = userId;
-    
-    console.log(`${userType} ${userId} joined chat_group ${groupId}`);
-    
-    // Notify new room that user joined
-    socket.to(String(groupId)).emit('userJoined', {
-      userType,
-      userId,
-      chatGroupId: groupId
-    });
   }
 
   /**
    * Handle explicit room leaving
    */
   handleLeavePreviousRoom(socket) {
+    if (!socket.isAuthenticated || !socket.user) {
+      socket.emit('error', { message: 'Authentication required' });
+      return;
+    }
+
     if (socket.chatGroupId) {
       socket.leave(String(socket.chatGroupId));
       
-      // Use fallback values to avoid "undefined undefined"
-      const userType = socket.userType || 'agent';
-      const userId = socket.userId || 'unknown';
-      
-      // Notify room that agent left
+      // Notify room that user left
       socket.to(String(socket.chatGroupId)).emit('userLeft', {
-        userType: userType,
-        userId: userId,
+        userType: socket.user.userType,
+        userId: socket.user.userId,
         chatGroupId: socket.chatGroupId
       });
       
-      console.log(`${userType} ${userId} left chat_group ${socket.chatGroupId}`);
+      console.log(`${socket.user.userType} ${socket.user.userId} left chat_group ${socket.chatGroupId}`);
+      
+      // Clear room info from socket
+      socket.chatGroupId = null;
     }
   }
 
@@ -123,34 +159,52 @@ class SocketHandlers {
    */
   async handleSendMessage(socket, messageData) {
     try {
-      const roomId = String(messageData.chat_group_id);
-      
-      // Determine sender type and validate message structure
-      const isAgent = messageData.sys_user_id && !messageData.client_id;
-      const isClient = messageData.client_id && !messageData.sys_user_id;
-      
-      if (!isAgent && !isClient) {
-        throw new Error('Invalid message structure: must have either sys_user_id or client_id');
+      // Validate authentication
+      if (!socket.isAuthenticated || !socket.user) {
+        socket.emit('messageError', { 
+          error: 'Authentication required',
+          tempId: messageData.tempId 
+        });
+        return;
       }
+
+      // Authorize message sending
+      const authResult = await this.messageAuth.authorizeSendMessage(socket.user, messageData);
       
-      console.log(`📨 Message from ${isAgent ? 'agent' : 'client'}:`, {
+      if (!authResult.authorized) {
+        socket.emit('messageError', { 
+          error: 'Message authorization failed',
+          details: authResult.reason,
+          tempId: messageData.tempId 
+        });
+        return;
+      }
+
+      const roomId = String(messageData.chat_group_id);
+      const sanitizedMessage = authResult.sanitizedMessage;
+      
+      // Determine sender type
+      const isAgent = socket.user.userType === 'agent';
+      const isClient = socket.user.userType === 'client';
+      
+      console.log(`📨 Authorized message from ${socket.user.userType}:`, {
         chat_group_id: messageData.chat_group_id,
-        sender_id: isAgent ? messageData.sys_user_id : messageData.client_id,
-        content_length: messageData.chat_body?.length || 0
+        sender_id: socket.user.userId,
+        content_length: sanitizedMessage.chat_body?.length || 0
       });
       
-      // Save message to database for both agent and client
-      const savedMessage = await chatController.handleSendMessage(messageData, this.io, socket);
+      // Save message to database
+      const savedMessage = await chatController.handleSendMessage(sanitizedMessage, this.io, socket);
       
       if (savedMessage) {
         // Standardized message format for broadcasting
         const broadcastMessage = {
           ...savedMessage,
-          sender_type: isAgent ? 'agent' : 'client',
-          sender_id: isAgent ? messageData.sys_user_id : messageData.client_id
+          sender_type: socket.user.userType,
+          sender_id: socket.user.userId
         };
         
-        // Single broadcast event for consistency
+        // Broadcast to room
         this.io.to(roomId).emit('receiveMessage', broadcastMessage);
         
         // Send delivery confirmation to sender
@@ -158,7 +212,7 @@ class SocketHandlers {
           chat_id: savedMessage.chat_id,
           chat_group_id: messageData.chat_group_id,
           timestamp: savedMessage.chat_created_at,
-          tempId: messageData.tempId // Include tempId for frontend confirmation
+          tempId: messageData.tempId
         });
         
         console.log(`✅ Message saved and broadcasted to chat_group ${messageData.chat_group_id}`);
@@ -169,7 +223,7 @@ class SocketHandlers {
         error: 'Failed to send message',
         details: error.message,
         chat_group_id: messageData.chat_group_id,
-        tempId: messageData.tempId // Include tempId for frontend error handling
+        tempId: messageData.tempId
       });
     }
   }

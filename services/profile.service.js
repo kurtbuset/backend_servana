@@ -198,7 +198,7 @@ class ProfileService {
    */
   async fetchUserDepartments(sysUserId) {
     try {
-      console.log(`🔍 Fetching departments for user ID: ${sysUserId}`);
+      // console.log(`🔍 Fetching departments for user ID: ${sysUserId}`);
       
       const { data: userDepartments, error } = await supabase
         .from("sys_user_department")
@@ -212,7 +212,7 @@ class ProfileService {
         `)
         .eq("sys_user_id", sysUserId);
 
-      console.log(`🔍 Raw query result:`, { userDepartments, error });
+      // console.log(`🔍 Raw query result:`, { userDepartments, error });
 
       if (error) {
         console.error("❌ Error fetching user departments:", error.message);
@@ -228,7 +228,7 @@ class ProfileService {
       // Filter out null departments and only return active departments
       const departments = (userDepartments || [])
         .filter(ud => {
-          console.log(`🔍 Processing department:`, ud);
+          // console.log(`🔍 Processing department:`, ud);
           return ud.department && ud.department.dept_is_active;
         })
         .map(ud => ({
