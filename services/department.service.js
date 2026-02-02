@@ -97,7 +97,7 @@ class DepartmentService {
         throw error;
       }
 
-      console.log(`🔍 Raw query result:`, userDepartments);
+      // console.log(`🔍 Raw query result:`, userDepartments);
 
       if (!userDepartments || userDepartments.length === 0) {
         console.log(`⚠️ No members found in sys_user_department for dept_id: ${deptId}`);

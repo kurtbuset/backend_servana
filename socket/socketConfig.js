@@ -2,6 +2,7 @@ const socketIo = require('socket.io');
 const SocketHandlers = require('./socketHandlers');
 const UserStatusHandlers = require('./userStatusHandlers');
 const UserStatusManager = require('./userStatusManager');
+const SocketAuthMiddleware = require('./middleware/socketAuth');
 
 /**
  * Socket.IO configuration and setup
@@ -14,6 +15,7 @@ class SocketConfig {
     this.handlers = null;
     this.userStatusHandlers = null;
     this.userStatusManager = null;
+    this.authMiddleware = new SocketAuthMiddleware();
   }
 
   /**
@@ -25,6 +27,14 @@ class SocketConfig {
         origin: this.allowedOrigins,
         credentials: true,
       }
+    });
+
+    // Add authentication middleware
+    console.log('🔐 Adding socket authentication middleware...');
+    this.io.use((socket, next) => {
+      console.log('🔍 Socket connection attempt:', socket.id);
+      // console.log('🔍 Headers:', socket.handshake.headers);
+      this.authMiddleware.authenticate(socket, next);
     });
 
     this.handlers = new SocketHandlers(this.io);
@@ -43,7 +53,7 @@ class SocketConfig {
   setupEventListeners() {
     this.io.on('connection', (socket) => {
       console.log(`User connected: ${socket.id}`);
-      
+        
       // User status events
       socket.on('userOnline', async (data) => {
         await this.userStatusHandlers.handleUserOnline(socket, data);
@@ -62,8 +72,8 @@ class SocketConfig {
       });
 
       // Chat events
-      socket.on('joinChatGroup', (data) => {
-        this.handlers.handleJoinChatGroup(socket, data);
+      socket.on('joinChatGroup', async (data) => {
+        await this.handlers.handleJoinChatGroup(socket, data);
       });
 
       socket.on('leavePreviousRoom', () => {
