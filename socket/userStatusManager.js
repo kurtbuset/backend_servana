@@ -9,6 +9,7 @@ class UserStatusManager {
     this.userStatusHandlers = userStatusHandlers;
     this.cleanupInterval = null;
     this.roomStatsInterval = null;
+    this.rateLimitCleanupInterval = null;
   }
 
   /**
@@ -17,6 +18,7 @@ class UserStatusManager {
   start() {
     this.startCleanupJob();
     this.startRoomStatsLogging();
+    this.startRateLimitCleanup();
     console.log('✅ User Status Manager started');
   }
 
@@ -34,16 +36,21 @@ class UserStatusManager {
       this.roomStatsInterval = null;
     }
     
+    if (this.rateLimitCleanupInterval) {
+      clearInterval(this.rateLimitCleanupInterval);
+      this.rateLimitCleanupInterval = null;
+    }
+    
     console.log('🛑 User Status Manager stopped');
   }
 
   /**
-   * Start cleanup job: Check for stale users every 60 seconds
+   * Start cleanup job: Check for stale users every 10 seconds
    */
   startCleanupJob() {
     this.cleanupInterval = setInterval(() => {
       this.cleanupStaleUsers();
-    }, 60000); // Run every 60 seconds
+    }, 10000); // Run every 10 seconds (reduced from 60s for faster cleanup)
   }
 
   /**
@@ -56,11 +63,21 @@ class UserStatusManager {
   }
 
   /**
+   * Start rate limit cleanup job: Clean up expired rate limit data every 5 minutes
+   */
+  startRateLimitCleanup() {
+    this.rateLimitCleanupInterval = setInterval(() => {
+      this.userStatusHandlers.cleanupRateLimits();
+      console.log('🧹 Rate limit data cleaned up');
+    }, 300000); // Run every 5 minutes
+  }
+
+  /**
    * Clean up stale users who haven't sent heartbeat
    */
   async cleanupStaleUsers() {
     const now = new Date();
-    const staleThreshold = 60000; // 60 seconds (2x heartbeat interval)
+    const staleThreshold = 45000; // 45 seconds (reduced from 60s for faster cleanup)
     const onlineUsers = this.userStatusHandlers.getOnlineUsers();
     
     const staleUsers = [];
