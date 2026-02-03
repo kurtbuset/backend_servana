@@ -301,7 +301,6 @@ class ClientAccountService {
    * Send client message
    */
   async sendClientMessage(message, clientId, deptId) {
-    console.log(deptId)
     // Check if chat group exists
     let { data: chatGroups, error: groupErr } = await supabase
       .from("chat_group")

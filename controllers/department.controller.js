@@ -111,10 +111,8 @@ class DepartmentController {
   async getDepartmentMembers(req, res) {
     try {
       const { id } = req.params;
-      console.log(`🔍 Fetching members for department ID: ${id}`);
 
       const members = await departmentService.getDepartmentMembers(id);
-      console.log(`✅ Found ${members.length} members for department ${id}`);
 
       res.status(200).json({ members });
     } catch (err) {

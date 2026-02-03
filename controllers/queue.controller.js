@@ -79,10 +79,18 @@ class QueueController {
             time: displayTime,
             status: group.status, // Include the actual status (queued or transferred)
           },
+          // Include raw timestamp for sorting
+          latestMessageTime: latestTime || new Date().toISOString(),
         };
       });
 
-      res.json(formatted.filter(Boolean));
+      // Sort by latest message time (newest first) and remove the sorting field
+      const sortedFormatted = formatted
+        .filter(Boolean)
+        .sort((a, b) => new Date(b.latestMessageTime) - new Date(a.latestMessageTime))
+        .map(({ latestMessageTime, ...rest }) => rest);
+
+      res.json(sortedFormatted);
     } catch (err) {
       console.error("❌ Error fetching chat groups:", err);
       res.status(500).json({ error: "Failed to fetch chat groups" });

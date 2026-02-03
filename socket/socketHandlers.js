@@ -46,14 +46,11 @@ class SocketHandlers {
           chatGroupId: socket.chatGroupId
         });
         
-        console.log(`${socket.user.userType} ${socket.user.userId} left chat_group ${socket.chatGroupId}`);
       }
       
       // Join new room
       socket.join(String(groupId));
       socket.chatGroupId = groupId;
-      
-      console.log(`${socket.user.userType} ${socket.user.userId} joined chat_group ${groupId}`);
       
       // Notify new room that user joined
       socket.to(String(groupId)).emit('userJoined', {
@@ -95,8 +92,6 @@ class SocketHandlers {
         chatGroupId: socket.chatGroupId
       });
       
-      console.log(`${socket.user.userType} ${socket.user.userId} left chat_group ${socket.chatGroupId}`);
-      
       // Clear room info from socket
       socket.chatGroupId = null;
     }
@@ -130,7 +125,6 @@ class SocketHandlers {
       chatGroupId: roomId
     });
     
-    console.log(`${userType} ${userId} left chat_group ${roomId}`);
   }
 
   /**
@@ -187,12 +181,6 @@ class SocketHandlers {
       const isAgent = socket.user.userType === 'agent';
       const isClient = socket.user.userType === 'client';
       
-      console.log(`📨 Authorized message from ${socket.user.userType}:`, {
-        chat_group_id: messageData.chat_group_id,
-        sender_id: socket.user.userId,
-        content_length: sanitizedMessage.chat_body?.length || 0
-      });
-      
       // Save message to database
       const savedMessage = await chatController.handleSendMessage(sanitizedMessage, this.io, socket);
       
@@ -214,8 +202,10 @@ class SocketHandlers {
           timestamp: savedMessage.chat_created_at,
           tempId: messageData.tempId
         });
+
+        // Handle real-time customer list sorting
+        await this.handleCustomerListUpdate(savedMessage, socket.user.userType);
         
-        console.log(`✅ Message saved and broadcasted to chat_group ${messageData.chat_group_id}`);
       }
     } catch (error) {
       console.error('❌ Error handling sendMessage:', error);
@@ -229,11 +219,200 @@ class SocketHandlers {
   }
 
   /**
+   * Handle real-time customer list updates when messages are sent
+   */
+  async handleCustomerListUpdate(savedMessage, senderType) {
+    try {
+      // Only update customer lists when clients send messages
+      // (agents sending messages don't change the customer order priority)
+      if (senderType !== 'client') {
+        return;
+      }
+
+      // Get chat group and department information
+      const chatGroupInfo = await this.getChatGroupInfo(savedMessage.chat_group_id);
+      if (!chatGroupInfo) {
+        console.error('❌ Could not find chat group info for customer list update');
+        return;
+      }
+
+      // Get client information for the update
+      const clientInfo = await this.getClientInfo(chatGroupInfo.client_id);
+      if (!clientInfo) {
+        console.error('❌ Could not find client info for customer list update');
+        return;
+      }
+
+      // Prepare customer update data
+      const customerUpdate = {
+        chat_group_id: savedMessage.chat_group_id,
+        client_id: chatGroupInfo.client_id,
+        timestamp: savedMessage.chat_created_at,
+        department_id: chatGroupInfo.dept_id,
+        customer: {
+          id: clientInfo.client_id,
+          chat_group_id: savedMessage.chat_group_id,
+          name: clientInfo.name,
+          number: clientInfo.client_number,
+          profile: clientInfo.profile_image,
+          time: new Date(savedMessage.chat_created_at).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          status: chatGroupInfo.status,
+          department: chatGroupInfo.department?.dept_name || 'Unknown', // Add department name
+        }
+      };
+
+      // Emit to agents in the same department
+      await this.notifyDepartmentAgents(chatGroupInfo.dept_id, customerUpdate);
+
+    } catch (error) {
+      console.error('❌ Error handling customer list update:', error);
+    }
+  }
+
+  /**
+   * Get chat group information including department
+   */
+  async getChatGroupInfo(chatGroupId) {
+    try {
+      const supabase = require('../helpers/supabaseClient');
+      
+      const { data: chatGroup, error } = await supabase
+        .from('chat_group')
+        .select(`
+          chat_group_id,
+          client_id,
+          dept_id,
+          sys_user_id,
+          status,
+          department:dept_id (
+            dept_id,
+            dept_name
+          )
+        `)
+        .eq('chat_group_id', chatGroupId)
+        .single();
+
+      if (error || !chatGroup) {
+        throw new Error('Chat group not found');
+      }
+
+      return chatGroup;
+    } catch (error) {
+      console.error('❌ Error getting chat group info:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get client information including profile
+   */
+  async getClientInfo(clientId) {
+    try {
+      const supabase = require('../helpers/supabaseClient');
+      
+      const { data: client, error } = await supabase
+        .from('client')
+        .select(`
+          client_id,
+          client_number,
+          prof_id,
+          profile:prof_id (
+            prof_firstname,
+            prof_lastname
+          )
+        `)
+        .eq('client_id', clientId)
+        .single();
+
+      if (error || !client) {
+        throw new Error('Client not found');
+      }
+
+      // Get profile image
+      let profileImage = null;
+      if (client.prof_id) {
+        const { data: image } = await supabase
+          .from('image')
+          .select('img_location')
+          .eq('prof_id', client.prof_id)
+          .eq('img_is_current', true)
+          .single();
+        
+        profileImage = image?.img_location || null;
+      }
+
+      const fullName = client.profile
+        ? `${client.profile.prof_firstname} ${client.profile.prof_lastname}`.trim()
+        : "Unknown Client";
+
+      return {
+        client_id: client.client_id,
+        client_number: client.client_number,
+        name: fullName,
+        profile_image: profileImage
+      };
+    } catch (error) {
+      console.error('❌ Error getting client info:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Notify agents in the same department about customer list updates
+   */
+  async notifyDepartmentAgents(departmentId, customerUpdate) {
+    try {
+      const supabase = require('../helpers/supabaseClient');
+      
+      // Get all agents in this department
+      const { data: departmentAgents, error } = await supabase
+        .from('sys_user_department')
+        .select(`
+          sys_user_id,
+          sys_user:sys_user_id (
+            sys_user_id,
+            sys_user_is_active
+          )
+        `)
+        .eq('dept_id', departmentId);
+
+      if (error || !departmentAgents) {
+        console.error('❌ Error getting department agents:', error);
+        return;
+      }
+
+      // Create department room name
+      const departmentRoom = `department_${departmentId}`;
+      
+      // Emit customer list update to department room
+      this.io.to(departmentRoom).emit('customerListUpdate', {
+        type: 'move_to_top',
+        data: customerUpdate
+      });
+
+      // Also emit to individual agent rooms as fallback
+      departmentAgents.forEach(agent => {
+        if (agent.sys_user?.is_active) {
+          const agentRoom = `agent_${agent.sys_user_id}`;
+          this.io.to(agentRoom).emit('customerListUpdate', {
+            type: 'move_to_top',
+            data: customerUpdate
+          });
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Error notifying department agents:', error);
+    }
+  }
+
+  /**
    * Handle user disconnection
    */
   handleDisconnect(socket) {
-    console.log(`❌ Client disconnected: ${socket.id}`);
-    
     // Notify room members about user leaving
     if (socket.chatGroupId && socket.userType) {
       socket.to(String(socket.chatGroupId)).emit('userLeft', {

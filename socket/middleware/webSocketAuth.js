@@ -15,8 +15,6 @@ class WebSocketAuth {
    */
   async authenticate(socket) {
     try {
-      console.log('🌐 Authenticating web client...');
-      
       // 1. Extract access token from cookies
       const token = this.extractAccessToken(socket);
       
@@ -271,7 +269,6 @@ class WebSocketAuth {
       details
     };
 
-    console.log(`🔒 Web Auth Event [${eventType}]:`, JSON.stringify(logEntry, null, 2));
   }
 }
 

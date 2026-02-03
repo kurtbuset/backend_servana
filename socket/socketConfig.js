@@ -57,6 +57,10 @@ class SocketConfig {
       // User status events
       socket.on('userOnline', async (data) => {
         await this.userStatusHandlers.handleUserOnline(socket, data);
+        // Join department rooms for agents
+        if (socket.user && socket.user.userType === 'agent') {
+          await this.joinDepartmentRooms(socket);
+        }
       });
 
       socket.on('userHeartbeat', async (data) => {
@@ -104,6 +108,45 @@ class SocketConfig {
         this.handlers.handleDisconnect(socket);
       });
     });
+  }
+
+  /**
+   * Join agent to their department rooms for receiving customer list updates
+   */
+  async joinDepartmentRooms(socket) {
+    try {
+      if (!socket.user || socket.user.userType !== 'agent') {
+        return;
+      }
+
+      const supabase = require('../helpers/supabaseClient');
+      
+      // Get agent's departments
+      const { data: userDepartments, error } = await supabase
+        .from('sys_user_department')
+        .select('dept_id')
+        .eq('sys_user_id', socket.user.userId);
+
+      if (error || !userDepartments) {
+        console.error('❌ Error getting agent departments for room joining:', error);
+        return;
+      }
+
+      // Join department rooms
+      userDepartments.forEach(dept => {
+        const departmentRoom = `department_${dept.dept_id}`;
+        socket.join(departmentRoom);
+        console.log(`🏢 Agent ${socket.user.userId} joined department room: ${departmentRoom}`);
+      });
+
+      // Also join individual agent room
+      const agentRoom = `agent_${socket.user.userId}`;
+      socket.join(agentRoom);
+      console.log(`👤 Agent ${socket.user.userId} joined personal room: ${agentRoom}`);
+
+    } catch (error) {
+      console.error('❌ Error joining department rooms:', error);
+    }
   }
 
   /**

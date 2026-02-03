@@ -14,10 +14,7 @@ class RoomAccess {
    * Check if user can join a specific chat room
    */
   async canJoinRoom(userContext, chatGroupId) {
-    console.log('can join room: ', userContext)
     try {
-      console.log(`🔐 Checking room access for ${userContext.userType} ${userContext.userId} to room ${chatGroupId}`);
-      
       // Validate room ID
       const roomId = this.validateRoomId(chatGroupId);
       
@@ -53,7 +50,6 @@ class RoomAccess {
       // Additional message-specific checks
       const roomInfo = await this.getRoomInfo(chatGroupId);
       
-      console.log('roomInfo: ', roomInfo)
       // Check if room is active
       if (roomInfo.status == 'ended') {
         return {
@@ -119,8 +115,6 @@ class RoomAccess {
    */
   async checkClientRoomAccess(userContext, roomInfo) {
     // Clients can only access rooms they own
-    console.log(userContext.clientId)
-    console.log(roomInfo.client_id)
     if (roomInfo.client_id !== userContext.clientId) {
       return {
         allowed: false,

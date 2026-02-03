@@ -111,12 +111,19 @@ class ChatController {
             sys_user_id: group.sys_user_id, // Include the assigned user ID
             status: "active", // Only active chats are returned
           },
+          // Include raw timestamp for sorting
+          latestMessageTime: latestTime || new Date().toISOString(),
         });
 
         return acc;
       }, []);
 
-      res.json(formatted);
+      // Sort by latest message time (newest first) and remove the sorting field
+      const sortedFormatted = formatted
+        .sort((a, b) => new Date(b.latestMessageTime) - new Date(a.latestMessageTime))
+        .map(({ latestMessageTime, ...rest }) => rest);
+
+      res.json(sortedFormatted);
     } catch (err) {
       console.error("❌ Error fetching chat groups:", err);
       res.status(500).json({ error: "Failed to fetch chat groups" });
@@ -259,17 +266,10 @@ class ChatController {
         ...(isClient && { client_id: rawMessage.client_id })
       };
 
-      console.log(`💾 Saving ${isAgent ? 'agent' : 'client'} message to database:`, {
-        chat_group_id: message.chat_group_id,
-        sender_id: isAgent ? message.sys_user_id : message.client_id,
-        content_length: message.chat_body.length
-      });
-
       // Insert message into database
       const insertedMessage = await chatService.insertMessage(message);
 
       if (insertedMessage) {
-        console.log(`✅ Message saved with ID: ${insertedMessage.chat_id}`);
         return insertedMessage;
       }
 

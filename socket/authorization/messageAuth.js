@@ -15,8 +15,6 @@ class MessageAuth {
    */
   async authorizeSendMessage(userContext, messageData) {
     try {
-      console.log(`📝 Authorizing message send for ${userContext.userType} ${userContext.userId}`);
-      
       // 1. Validate message data structure
       this.validateMessageData(messageData);
       
@@ -57,8 +55,6 @@ class MessageAuth {
    */
   async authorizeViewMessages(userContext, chatGroupId, messageFilters = {}) {
     try {
-      console.log(`👀 Authorizing message view for ${userContext.userType} ${userContext.userId}`);
-      
       // Check room access permissions
       const roomAccess = await this.roomAccess.canViewMessages(userContext, chatGroupId);
       if (!roomAccess.allowed) {
@@ -390,7 +386,6 @@ class MessageAuth {
   resetRateLimit(userType, userId) {
     const userKey = `${userType}_${userId}`;
     this.rateLimiters.delete(userKey);
-    console.log(`Rate limit reset for user: ${userKey}`);
   }
 }
 
