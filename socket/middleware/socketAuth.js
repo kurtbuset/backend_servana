@@ -20,17 +20,15 @@ class SocketAuthMiddleware {
    */
   async authenticate(socket, next) {
     try {
-      console.log(`🔐 Authenticating socket connection: ${socket.id}`);
-      console.log(`🔍 Socket handshake headers:`, socket.handshake.headers);
-      console.log(`🔍 Socket handshake auth:`, socket.handshake.auth);
+      console.log(`🔐 [USER_STATUS] Authenticating socket ${socket.id}...`);
       
       // 1. Detect client type (web/mobile)
       const clientType = this.detectClientType(socket);
-      console.log(`📱 Client type detected: ${clientType}`);
       
       // 2. Route to appropriate auth method
       const authResult = await this.authenticateByType(socket, clientType);
-      console.log(`✅ Authentication successful for user: ${authResult.userId}`);
+      
+      console.log(`✅ [USER_STATUS] Authentication successful for socket ${socket.id}, user: ${authResult.userId} (${authResult.userType})`);
       
       // 3. Validate user context and permissions
       const userContext = await this.validateUserContext(authResult);
@@ -73,32 +71,27 @@ class SocketAuthMiddleware {
    */
   detectClientType(socket) {
     const headers = socket.handshake.headers;
-    console.log(`🔍 Detecting client type from headers:`, {
-      authorization: headers.authorization ? 'Bearer token present' : 'No authorization header',
-      cookie: headers.cookie ? 'Cookies present' : 'No cookies',
-      userAgent: headers['user-agent']
-    });
+    
+    console.log(`🔍 [USER_STATUS] Detecting client type for socket ${socket.id}`);
     
     // Check for JWT in Authorization header (mobile)
     if (headers.authorization && headers.authorization.startsWith('Bearer ')) {
-      console.log(`📱 Mobile client detected: Bearer token found`);
+      console.log(`📱 [USER_STATUS] Mobile client detected for socket ${socket.id}`);
       return 'mobile';
     }
     
     // Check for cookies (web)
     if (headers.cookie && headers.cookie.includes('access_token')) {
-      console.log(`🌐 Web client detected: access_token cookie found`);
+      console.log(`🌐 [USER_STATUS] Web client detected for socket ${socket.id}`);
       return 'web';
     }
     
     // Check user-agent for additional context
     const userAgent = headers['user-agent'] || '';
     if (userAgent.includes('Expo') || userAgent.includes('ReactNative')) {
-      console.log(`📱 Mobile user-agent detected but no Bearer token`);
       throw new Error('Mobile client detected but no Bearer token provided');
     }
     
-    console.log(`❌ No valid authentication method found`);
     throw new Error('No valid authentication method found. Please provide either cookies (web) or Authorization header (mobile)');
   }
 
@@ -198,7 +191,6 @@ class SocketAuthMiddleware {
       
       // Disconnect if no heartbeat for 10 minutes
       if (timeSinceLastHeartbeat > 10 * 60 * 1000) {
-        console.log(`Disconnecting stale socket ${socket.id} (no heartbeat for ${Math.floor(timeSinceLastHeartbeat / 1000)}s)`);
         socket.disconnect(true);
       }
     }, 2 * 60 * 1000); // Check every 2 minutes
@@ -210,8 +202,6 @@ class SocketAuthMiddleware {
    * Clean up session on disconnect
    */
   cleanupSession(socket, reason) {
-    console.log(`🔌 Cleaning up session for socket ${socket.id}, reason: ${reason}`);
-    
     // Clear intervals
     if (socket.tokenValidationInterval) {
       clearInterval(socket.tokenValidationInterval);
@@ -227,8 +217,6 @@ class SocketAuthMiddleware {
     socket.clientType = null;
     socket.authenticatedAt = null;
     socket.chatGroupId = null;
-    
-    console.log(`✅ User context cleared for socket ${socket.id}`);
     
     // Log disconnection
     securityLogger.logAuthEvent('disconnect', socket.id, socket.user || {}, { reason });

@@ -41,8 +41,6 @@ class ProfileController {
       let privileges = null;
       if (userRow.role_id) {
         try {
-          // console.log(`🔍 Fetching privileges for user ${sysUserId} with role_id: ${userRow.role_id}`);
-          
           // First get the role to find the priv_id
           const { data: roleData, error: roleError } = await require("../helpers/supabaseClient")
             .from("role")
@@ -50,11 +48,7 @@ class ProfileController {
             .eq("role_id", userRow.role_id)
             .single();
 
-          // console.log(`🔍 Role query result:`, { roleData, roleError });
-
           if (!roleError && roleData?.priv_id) {
-            // console.log(`🔍 Found role "${roleData.role_name}" with priv_id: ${roleData.priv_id}`);
-            
             // Then fetch the privilege data using the priv_id
             const { data: privData, error: privError } = await require("../helpers/supabaseClient")
               .from("privilege")
@@ -76,12 +70,9 @@ class ProfileController {
               .eq("priv_id", roleData.priv_id)
               .single();
 
-            // console.log(`🔍 Privilege query result:`, { privData, privError });
-
             if (!privError && privData) {
               privileges = privData;
-              console.log("✅ Successfully fetched privileges for priv_id:", roleData.priv_id);
-              // console.log("✅ Privilege values:", privileges);
+              // Privilege values available
             } else {
               console.error("❌ Failed to fetch privilege data:", privError);
               console.error("❌ Attempted to fetch priv_id:", roleData.priv_id);
@@ -99,7 +90,6 @@ class ProfileController {
 
       // Fetch user departments
       const departments = await profileService.fetchUserDepartments(sysUserId);
-      // console.log(`🔍 Profile Controller - Departments fetched:`, departments);
 
       const responseData = {
         sys_user_id: userRow.sys_user_id,

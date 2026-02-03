@@ -16,8 +16,6 @@ class MobileSocketAuth {
    */
   async authenticate(socket) {
     try {
-      console.log('📱 Authenticating mobile client...');
-      
       // 1. Extract JWT token from Authorization header
       const token = this.extractBearerToken(socket);
       
@@ -284,8 +282,6 @@ class MobileSocketAuth {
       userAgent: socket.handshake.headers['user-agent'],
       details
     };
-
-    console.log(`🔒 Mobile Auth Event [${eventType}]:`, JSON.stringify(logEntry, null, 2));
   }
 
   /**

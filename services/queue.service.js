@@ -73,18 +73,18 @@ class QueueService {
   }
 
   /**
-   * Get latest message timestamp for chat groups - Optimized query
+   * Get latest message timestamp for chat groups - Optimized query with proper sorting
    */
   async getLatestMessageTimes(chatGroupIds) {
     if (!chatGroupIds || chatGroupIds.length === 0) return {};
 
-    // Optimized query with proper ordering to get latest message per group
+    // Optimized query to get latest message per group, sorted by newest first
     const { data: messages, error } = await supabase
       .from("chat")
       .select("chat_group_id, chat_created_at")
       .in("chat_group_id", chatGroupIds)
       .not("client_id", "is", null) // Only get messages from clients
-      .order("chat_group_id, chat_created_at");
+      .order("chat_created_at", { ascending: false }); // Sort by newest first
 
     if (error) throw error;
 
@@ -92,7 +92,7 @@ class QueueService {
     const timeMap = {};
     const processedGroups = new Set();
 
-    // Process messages - first occurrence per group will be the latest
+    // Process messages - first occurrence per group will be the latest due to sorting
     (messages || []).forEach((msg) => {
       if (!processedGroups.has(msg.chat_group_id)) {
         timeMap[msg.chat_group_id] = msg.chat_created_at;

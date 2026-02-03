@@ -219,8 +219,6 @@ class AgentService {
     let profileId = null;
 
     try {
-      console.log(`🔄 Creating agent: ${email}`);
-
       // Step 1: Create Supabase Auth user
       const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
         email,
@@ -234,12 +232,10 @@ class AgentService {
       }
       
       authUserId = authUser.user.id;
-      console.log(`✅ Auth user created: ${authUserId}`);
 
       // Step 2: Create profile
       const profile = await profileService.createMinimalProfile();
       profileId = profile.prof_id;
-      console.log(`✅ Profile created: ${profileId}`);
 
       // Step 3: Insert system_user with profile link
       const { data: insertedUser, error: insertError } = await supabase
@@ -261,16 +257,13 @@ class AgentService {
       }
 
       newUserId = insertedUser.sys_user_id;
-      console.log(`✅ System user created: ${newUserId}`);
 
       // Step 4: Handle departments
       if (departments && departments.length > 0) {
         const deptRows = await this.getDepartmentIdsByNames(departments);
         await this.insertUserDepartments(newUserId, deptRows.map((d) => d.dept_id));
-        console.log(`✅ Departments assigned: ${departments.join(', ')}`);
       }
 
-      console.log(`✅ Agent creation completed successfully: ${email}`);
       return { id: newUserId, email };
 
     } catch (error) {
@@ -280,23 +273,19 @@ class AgentService {
       try {
         // Remove system user if created
         if (newUserId) {
-          console.log(`🔄 Rolling back system user: ${newUserId}`);
           await supabase.from("sys_user").delete().eq("sys_user_id", newUserId);
         }
 
         // Remove profile if created
         if (profileId) {
-          console.log(`🔄 Rolling back profile: ${profileId}`);
           await supabase.from("profile").delete().eq("prof_id", profileId);
         }
 
         // Remove auth user if created
         if (authUserId) {
-          console.log(`🔄 Rolling back auth user: ${authUserId}`);
           await supabase.auth.admin.deleteUser(authUserId);
         }
 
-        console.log('✅ Rollback completed successfully');
       } catch (rollbackError) {
         console.error('❌ Rollback failed:', rollbackError.message);
         // Don't throw rollback error, throw original error

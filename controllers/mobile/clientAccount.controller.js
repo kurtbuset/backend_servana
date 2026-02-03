@@ -58,7 +58,6 @@ class ClientAccountController {
       await clientAccountService.upsertOtp(phone_country_code, phone_number, otp_hash, expires_at);
 
       // TODO: Replace with actual SMS sending
-      console.log(`OTP for ${phone_country_code}${phone_number}: ${otp}`);
 
       res.status(200).json({ message: "OTP sent successfully" });
     } catch (err) {

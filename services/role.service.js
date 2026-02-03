@@ -275,7 +275,6 @@ class RoleService {
     try {
       // For demonstration purposes, we'll just log the change
       // In a real implementation, you would store this in the database
-      console.log(`Individual permission update: User ${userId} chat permission set to: ${canViewChats}`);
       
       // Simulate a successful update
       return { success: true };

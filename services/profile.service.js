@@ -198,8 +198,6 @@ class ProfileService {
    */
   async fetchUserDepartments(sysUserId) {
     try {
-      // console.log(`🔍 Fetching departments for user ID: ${sysUserId}`);
-      
       const { data: userDepartments, error } = await supabase
         .from("sys_user_department")
         .select(`
@@ -212,8 +210,6 @@ class ProfileService {
         `)
         .eq("sys_user_id", sysUserId);
 
-      // console.log(`🔍 Raw query result:`, { userDepartments, error });
-
       if (error) {
         console.error("❌ Error fetching user departments:", error.message);
         console.error("❌ Error details:", error);
@@ -221,14 +217,12 @@ class ProfileService {
       }
 
       if (!userDepartments || userDepartments.length === 0) {
-        console.log(`⚠️ No departments found for user ${sysUserId}`);
         return [];
       }
 
       // Filter out null departments and only return active departments
       const departments = (userDepartments || [])
         .filter(ud => {
-          // console.log(`🔍 Processing department:`, ud);
           return ud.department && ud.department.dept_is_active;
         })
         .map(ud => ({
@@ -236,7 +230,6 @@ class ProfileService {
           dept_name: ud.department.dept_name
         }));
 
-      // console.log(`✅ Fetched ${departments.length} departments for user ${sysUserId}:`, departments);
       return departments;
     } catch (error) {
       console.error("❌ Exception fetching user departments:", error.message);
@@ -306,8 +299,6 @@ class ProfileService {
         prof_date_of_birth: profileData.dateOfBirth || null,
       };
 
-      console.log('📝 Creating profile with data:', defaultProfile);
-
       const { data: profile, error } = await supabase
         .from("profile")
         .insert(defaultProfile)
@@ -319,7 +310,6 @@ class ProfileService {
         throw error;
       }
 
-      console.log('✅ Profile created successfully:', profile.prof_id);
       return profile;
     } catch (error) {
       console.error('❌ Error in createProfile:', error.message);
@@ -332,7 +322,6 @@ class ProfileService {
    */
   async createMinimalProfile() {
     try {
-      console.log('📝 Creating minimal profile with default values');
       return await this.createProfile({});
     } catch (error) {
       console.error('❌ Error in createMinimalProfile:', error.message);
@@ -368,8 +357,6 @@ class ProfileService {
    */
   async backfillMissingProfiles() {
     try {
-      console.log('🔄 Starting backfill process for users without profiles');
-
       // Find all users with null prof_id
       const { data: usersWithoutProfiles, error: fetchError } = await supabase
         .from("sys_user")
@@ -382,19 +369,14 @@ class ProfileService {
       }
 
       if (!usersWithoutProfiles || usersWithoutProfiles.length === 0) {
-        console.log('✅ No users found without profiles');
         return { processed: 0, successful: 0, failed: 0 };
       }
-
-      console.log(`📊 Found ${usersWithoutProfiles.length} users without profiles`);
 
       let successful = 0;
       let failed = 0;
 
       for (const user of usersWithoutProfiles) {
         try {
-          console.log(`🔄 Processing user ${user.sys_user_id} (${user.sys_user_email})`);
-
           // Create minimal profile
           const profile = await this.createMinimalProfile();
 
@@ -411,7 +393,6 @@ class ProfileService {
             console.error(`❌ Failed to link profile ${profile.prof_id} to user ${user.sys_user_id}:`, updateError);
             failed++;
           } else {
-            console.log(`✅ Successfully created and linked profile ${profile.prof_id} for user ${user.sys_user_id}`);
             successful++;
           }
         } catch (error) {
@@ -426,7 +407,6 @@ class ProfileService {
         failed
       };
 
-      console.log('📊 Backfill process completed:', result);
       return result;
     } catch (error) {
       console.error('❌ Error in backfillMissingProfiles:', error.message);

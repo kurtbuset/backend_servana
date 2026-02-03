@@ -72,8 +72,6 @@ class DepartmentService {
    * Get all members of a department from sys_user_department table
    */
   async getDepartmentMembers(deptId) {
-    console.log(`🔍 Department Service - Fetching members for dept_id: ${deptId}`);
-
     try {
       const { data: userDepartments, error } = await supabase
         .from("sys_user_department")
@@ -97,10 +95,7 @@ class DepartmentService {
         throw error;
       }
 
-      // console.log(`🔍 Raw query result:`, userDepartments);
-
       if (!userDepartments || userDepartments.length === 0) {
-        console.log(`⚠️ No members found in sys_user_department for dept_id: ${deptId}`);
         return [];
       }
 
@@ -156,12 +151,6 @@ class DepartmentService {
 
           const departments = userDepts?.map(ud => ud.department).filter(Boolean) || [];
 
-          console.log(`👤 User ${userId}:`, {
-            profile: profile ? `${profile.prof_firstname} ${profile.prof_lastname}` : 'Not found',
-            image: image ? { img_id: image.img_id, img_location: image.img_location } : 'Not found',
-            departments: departments.map(d => d.dept_name).join(', ')
-          });
-
           return {
             sys_user_id: ud.sys_user.sys_user_id,
             sys_user_email: ud.sys_user.sys_user_email,
@@ -175,7 +164,6 @@ class DepartmentService {
         });
 
       const members = await Promise.all(memberPromises);
-      console.log(`✅ Processed ${members.length} members`);
       return members;
     } catch (error) {
       console.error("❌ Exception in getDepartmentMembers:", error);
