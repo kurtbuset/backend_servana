@@ -209,16 +209,42 @@ class QueueService {
   }
 
   /**
-   * Get chat messages with pagination and sender information
+   * Get chat messages with pagination and sender information - Optimized with profile images
    */
   async getChatMessages(clientId, groupIdsToFetch, before = null, limit = 10, currentUserId = null) {
+    // Single optimized query with all necessary joins
     let query = supabase
       .from("chat")
       .select(`
-        *,
+        chat_id,
+        chat_body,
+        chat_created_at,
+        chat_group_id,
+        client_id,
+        sys_user_id,
         sys_user:sys_user(
           sys_user_id,
-          profile:profile(prof_firstname, prof_lastname)
+          prof_id,
+          profile:profile(
+            prof_firstname, 
+            prof_lastname,
+            image:image!prof_id(
+              img_location,
+              img_is_current
+            )
+          )
+        ),
+        client:client(
+          client_id,
+          prof_id,
+          profile:profile(
+            prof_firstname,
+            prof_lastname,
+            image:image!prof_id(
+              img_location,
+              img_is_current
+            )
+          )
         )
       `)
       .or(
@@ -239,7 +265,7 @@ class QueueService {
     const { data: rows, error } = await query;
     if (error) throw error;
 
-    // Deduplicate messages
+    // Deduplicate messages and process in single pass
     const seen = new Set();
     const messages = (rows || [])
       .filter((r) => {
@@ -250,7 +276,8 @@ class QueueService {
       .map((msg) => ({
         ...msg,
         sender_type: this.determineSenderType(msg, currentUserId),
-        sender_name: this.getSenderName(msg)
+        sender_name: this.getSenderName(msg),
+        sender_image: this.getSenderImageOptimized(msg)
       }))
       .reverse();
 
@@ -287,6 +314,24 @@ class QueueService {
       return 'Agent';
     }
     return 'System';
+  }
+
+  /**
+   * Get sender profile image - Optimized version using joined data
+   */
+  getSenderImageOptimized(message) {
+    if (message.client_id && !message.sys_user_id && message.client?.profile?.image) {
+      // Client message - get current image from joined data
+      const images = message.client.profile.image || [];
+      const currentImage = images.find(img => img.img_is_current);
+      return currentImage?.img_location || null;
+    } else if (message.sys_user_id && message.sys_user?.profile?.image) {
+      // Agent message - get current image from joined data
+      const images = message.sys_user.profile.image || [];
+      const currentImage = images.find(img => img.img_is_current);
+      return currentImage?.img_location || null;
+    }
+    return null;
   }
 }
 

@@ -33,6 +33,9 @@ class WebSocketAuth {
         supabaseUserId: supabaseUser.id,
         userType: 'agent',
         roleId: systemUser.role_id,
+        profId: systemUser.prof_id,
+        firstName: systemUser.profile?.prof_firstname,
+        lastName: systemUser.profile?.prof_lastname,
         email: supabaseUser.email,
         isActive: true,
         token: token,
@@ -113,10 +116,15 @@ class WebSocketAuth {
         .select(`
           sys_user_id,
           role_id,
+          prof_id,
           sys_user_email,
           sys_user_is_active,
           role:role_id (
             role_name
+          ),
+          profile:prof_id (
+            prof_firstname,
+            prof_lastname
           )
         `)
         .eq('supabase_user_id', supabaseUserId)

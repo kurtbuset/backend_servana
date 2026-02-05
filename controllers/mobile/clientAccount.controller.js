@@ -51,6 +51,7 @@ class ClientAccountController {
 
       // Generate and hash OTP
       const otp = clientAccountService.generateOtp();
+      console.log(`🔐 Generated OTP for ${phone_country_code}${phone_number}: ${otp}`);
       const otp_hash = await bcrypt.hash(otp, 10);
       const expires_at = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 

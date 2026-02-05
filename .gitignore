@@ -27,3 +27,8 @@ dist-ssr
 # git history
 .history
 .expo
+jest.config.js
+testing/auth.test.js
+testing/mdas.js
+testing/mdas.test.js
+testing/setup.js

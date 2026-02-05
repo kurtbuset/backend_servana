@@ -1,5 +1,6 @@
 const supabase = require("../helpers/supabaseClient");
 const profileService = require("./profile.service");
+const roleService = require("./role.service");
 
 // Role name constants - more maintainable than hardcoded IDs
 const ROLE_NAMES = {
@@ -213,13 +214,18 @@ class AgentService {
   /**
    * Create new agent
    */
-  async createAgent(email, password, departments, roleId = 3) {
+  async createAgent(email, password, departments, roleId = null) {
     let authUserId = null;
     let newUserId = null;
     let profileId = null;
 
     try {
-      // Step 1: Create Supabase Auth user
+      // Step 1: Get Agent role ID if not provided
+      if (!roleId) {
+        roleId = await roleService.getRoleId(ROLE_NAMES.AGENT);
+      }
+
+      // Step 2: Create Supabase Auth user
       const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
         email,
         password,
@@ -233,11 +239,11 @@ class AgentService {
       
       authUserId = authUser.user.id;
 
-      // Step 2: Create profile
+      // Step 3: Create profile
       const profile = await profileService.createMinimalProfile();
       profileId = profile.prof_id;
 
-      // Step 3: Insert system_user with profile link
+      // Step 4: Insert system_user with profile link
       const { data: insertedUser, error: insertError } = await supabase
         .from("sys_user")
         .insert({
@@ -258,7 +264,7 @@ class AgentService {
 
       newUserId = insertedUser.sys_user_id;
 
-      // Step 4: Handle departments
+      // Step 5: Handle departments
       if (departments && departments.length > 0) {
         const deptRows = await this.getDepartmentIdsByNames(departments);
         await this.insertUserDepartments(newUserId, deptRows.map((d) => d.dept_id));

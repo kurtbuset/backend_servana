@@ -33,6 +33,7 @@ class MobileSocketAuth {
         userId: clientData.client_id,
         userType: 'client',
         clientId: clientData.client_id,
+        profId: clientData.prof_id,
         firstName: clientData.profile?.prof_firstname,
         lastName: clientData.profile?.prof_lastname,
         countryCode: clientData.client_country_code,
