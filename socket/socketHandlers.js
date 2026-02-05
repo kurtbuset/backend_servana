@@ -185,11 +185,23 @@ class SocketHandlers {
       const savedMessage = await chatController.handleSendMessage(sanitizedMessage, this.io, socket);
       
       if (savedMessage) {
+        // Get sender's profile image
+        let senderImage = null;
+        if (socket.user.profId) {
+          const chatService = require('../services/chat.service');
+          const profileImages = await chatService.getProfileImages([socket.user.profId]);
+          senderImage = profileImages[socket.user.profId] || null;
+        }
+
         // Standardized message format for broadcasting
         const broadcastMessage = {
           ...savedMessage,
           sender_type: socket.user.userType,
-          sender_id: socket.user.userId
+          sender_id: socket.user.userId,
+          sender_name: socket.user.firstName && socket.user.lastName 
+            ? `${socket.user.firstName} ${socket.user.lastName}`.trim()
+            : socket.user.userType === 'client' ? 'Client' : 'Agent',
+          sender_image: senderImage
         };
         
         // Broadcast to room
