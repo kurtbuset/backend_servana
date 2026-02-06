@@ -231,6 +231,84 @@ class ClientAccountService {
   }
 
   /**
+   * Get client by ID
+   */
+  async getClientById(clientId) {
+    const { data, error } = await supabase
+      .from("client")
+      .select(`
+        *,
+        prof_id (
+          prof_id,
+          prof_firstname,
+          prof_middlename,
+          prof_lastname,
+          prof_address,
+          prof_date_of_birth,
+          prof_street_address,
+          prof_region_info,
+          prof_postal_code
+        )
+      `)
+      .eq("client_id", clientId)
+      .single();
+
+    if (error || !data) {
+      throw new Error("Client not found");
+    }
+
+    return data;
+  }
+
+  /**
+   * Upload profile picture to Supabase Storage
+   */
+  async uploadProfilePicture(profId, fileBuffer, mimeType) {
+    try {
+      // Generate unique filename
+      const fileExt = mimeType.split('/')[1];
+      const fileName = `${profId}_${Date.now()}.${fileExt}`;
+      const filePath = `profile-pictures/${fileName}`;
+
+      // Upload to Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('profile-images')
+        .upload(filePath, fileBuffer, {
+          contentType: mimeType,
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error('Supabase storage upload error:', uploadError);
+        throw new Error('Failed to upload image to storage');
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('profile-images')
+        .getPublicUrl(filePath);
+
+      const imageUrl = urlData.publicUrl;
+
+      // Update profile with image URL
+      const { error: updateError } = await supabase
+        .from('profile')
+        .update({ prof_picture: imageUrl })
+        .eq('prof_id', profId);
+
+      if (updateError) {
+        console.error('Profile update error:', updateError);
+        throw new Error('Failed to update profile with image URL');
+      }
+
+      return imageUrl;
+    } catch (error) {
+      console.error('Upload profile picture error:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Update chat group department
    */
   async updateChatGroupDepartment(chatGroupId, deptId) {

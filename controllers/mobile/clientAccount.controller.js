@@ -1,7 +1,23 @@
 const express = require("express");
+const multer = require("multer");
 const clientAccountService = require("../../services/mobile/clientAccount.service");
 const bcrypt = require("bcrypt");
 const getCurrentMobileUser = require("../../middleware/getCurrentMobileUser");
+
+// Configure multer for file uploads
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept images only
+    if (!file.mimetype.startsWith('image/')) {
+      return cb(new Error('Only image files are allowed'), false);
+    }
+    cb(null, true);
+  }
+});
 
 class ClientAccountController {
   getRouter() {
@@ -14,6 +30,7 @@ class ClientAccountController {
     router.post("/logincl", (req, res) => this.loginClient(req, res));
 
     // Protected routes (authentication required)
+    router.post("/profile/picture", getCurrentMobileUser, upload.single("profile_picture"), (req, res) => this.uploadProfilePicture(req, res));
     router.patch("/chat_group/:id/set-department", getCurrentMobileUser, (req, res) => this.setChatGroupDepartment(req, res));
     router.put("/:prof_id", getCurrentMobileUser, (req, res) => this.updateProfile(req, res));
     router.post("/client", getCurrentMobileUser, (req, res) => this.sendClientMessage(req, res));
@@ -205,6 +222,47 @@ class ClientAccountController {
     } catch (err) {
       console.error("Login error:", err);
       res.status(401).json({ error: err.message });
+    }
+  }
+
+  /**
+   * Upload profile picture
+   */
+  async uploadProfilePicture(req, res) {
+    try {
+      const clientId = req.clientId; // From getCurrentMobileUser middleware
+      const file = req.file;
+
+      if (!file) {
+        return res.status(400).json({ error: "No image file provided" });
+      }
+
+      // Get client's profile ID
+      const client = await clientAccountService.getClientById(clientId);
+      
+      if (!client || !client.prof_id) {
+        return res.status(404).json({ error: "Client profile not found" });
+      }
+
+      // Upload image to Supabase Storage
+      const imageUrl = await clientAccountService.uploadProfilePicture(
+        client.prof_id,
+        file.buffer,
+        file.mimetype
+      );
+
+      res.status(200).json({
+        message: "Profile picture uploaded successfully",
+        profile_picture_url: imageUrl,
+      });
+    } catch (err) {
+      console.error("Upload profile picture error:", err);
+      
+      if (err.message === "Client not found") {
+        return res.status(404).json({ error: err.message });
+      }
+      
+      res.status(500).json({ error: err.message || "Failed to upload profile picture" });
     }
   }
 
