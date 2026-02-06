@@ -15,6 +15,16 @@ const mobileMessageController = require('../controllers/mobile/message.controlle
 const roleService = require('../services/role.service');
 
 async function setupRoutes(app) {
+  // Health check endpoint for mobile testing
+  app.get('/health', (req, res) => {
+    res.json({ 
+      status: 'OK', 
+      message: 'Server is running',
+      timestamp: new Date().toISOString(),
+      ip: req.ip || req.connection.remoteAddress
+    });
+  });
+
   // Auth routes
   app.use('/auth', authController.getRouter());
   
@@ -35,8 +45,8 @@ async function setupRoutes(app) {
   app.use('/roles', roleController.getRouter());
   app.use('/change-role', changeRoleController.getRouter());
   
-  // Role-based macro routes
-  await initializeRoleBasedRoutes(app);
+  // Dynamic macro routes (new approach)
+  app.use('/macros', macroController.getRouter());
   
   // Mobile routes
   app.use('/clientAccount', clientAccountController.getRouter());
@@ -44,21 +54,5 @@ async function setupRoutes(app) {
   app.use('/messages', mobileMessageController.getRouter());
 }
 
-async function initializeRoleBasedRoutes(app) {
-  try {
-    const [AGENT_ROLE_ID, CLIENT_ROLE_ID] = await Promise.all([
-      roleService.getRoleId('Agent'),
-      roleService.getRoleId('Client'),
-    ]);
-    
-    app.use('/agents', macroController.getRouterForRole(AGENT_ROLE_ID));
-    app.use('/clients', macroController.getRouterForRole(CLIENT_ROLE_ID));
-    
-    console.log('✅ Role-based routes initialized');
-  } catch (error) {
-    console.error('❌ Failed to initialize role-based routes:', error.message);
-    process.exit(1);
-  }
-}
 
-module.exports = { setupRoutes };
+module.exports = { setupRoutes }; 

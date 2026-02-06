@@ -8,6 +8,7 @@ require('dotenv').config();
 const { initializeSocket } = require('./socket');
 const { setupRoutes } = require('./routes');
 const { getCorsConfig } = require('./config/cors.config');
+const { connectRedis } = require('./helpers/redisClient');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -34,8 +35,30 @@ const io = initializeSocket(server, getCorsConfig().allowedOrigins);
 
 app.set('io', io);
 
-server.listen(port, () => {
-  console.log(`🚀 Server running on port ${port}`);
-});
+// ===========================
+// Initialize Redis & Start Server
+// ===========================
+async function startServer() {
+  try {
+    // Initialize Redis connection
+    // const redisClient = await connectRedis();
+    // if (redisClient) {
+    //   app.set('redis', redisClient);
+    // } 
+    
+    // Start the server on all network interfaces (0.0.0.0)
+    server.listen(port, '0.0.0.0', () => {
+      console.log(`🚀 Server running on port ${port}`);
+      console.log(`🌐 Server accessible at:`);
+      console.log(`   - Local: http://localhost:${port}`);
+      console.log(`   - Network: http://192.168.137.53:${port}`);
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error.message);
+  }
+}
+
+// Start the server
+startServer();
 
 module.exports = { app, server, io };
