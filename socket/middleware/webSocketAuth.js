@@ -42,7 +42,6 @@ class WebSocketAuth {
         socket: socket
       };
     } catch (error) {
-      console.error('❌ Web authentication failed:', error.message);
       throw new Error(`Web authentication failed: ${error.message}`);
     }
   }
@@ -84,7 +83,6 @@ class WebSocketAuth {
       const { data: authData, error: authError } = await supabase.auth.getUser(token);
       
       if (authError) {
-        console.error('Supabase auth error:', authError);
         throw new Error('Invalid or expired token');
       }
 
@@ -132,7 +130,6 @@ class WebSocketAuth {
         .single();
 
       if (error) {
-        console.error('Database error fetching system user:', error);
         throw new Error('Failed to fetch user data');
       }
 
@@ -202,7 +199,6 @@ class WebSocketAuth {
 
       return null; // No refresh needed
     } catch (error) {
-      console.warn('Token refresh check failed:', error.message);
       return null;
     }
   }

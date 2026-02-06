@@ -8,10 +8,10 @@ require('dotenv').config();
 const { initializeSocket } = require('./socket');
 const { setupRoutes } = require('./routes');
 const { getCorsConfig } = require('./config/cors.config');
-const { connectRedis } = require('./helpers/redisClient');
+const { cacheManager } = require('./helpers/redisClient');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5000;
 
 // ===========================
 // Middleware
@@ -36,15 +36,23 @@ const io = initializeSocket(server, getCorsConfig().allowedOrigins);
 app.set('io', io);
 
 // ===========================
-// Initialize Redis & Start Server
+// Initialize Cache Manager & Start Server
 // ===========================
 async function startServer() {
   try {
-    // Initialize Redis connection
-    // const redisClient = await connectRedis();
-    // if (redisClient) {
-    //   app.set('redis', redisClient);
-    // } 
+    // Initialize Redis Cache Manager
+    const cache = await cacheManager.connect();
+    if (cache) {
+      app.set('cache', cache);
+      console.log('🗄️ Cache Manager initialized');
+      
+      // Start cleanup job every 5 minutes
+      setInterval(() => {
+        cache.cleanup();
+      }, 5 * 60 * 1000);
+    } else {
+      console.log('⚠️ Server starting without cache (Redis unavailable)');
+    } 
     
     // Start the server on all network interfaces (0.0.0.0)
     server.listen(port, '0.0.0.0', () => {

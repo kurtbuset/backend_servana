@@ -1,51 +1,53 @@
 const supabase = require("../helpers/supabaseClient");
+const cacheService = require("./cache.service");
 
 class QueueService {
   constructor() {
-    this.departmentCache = new Map();
-    this.cacheExpiry = 5 * 60 * 1000; // 5 minutes
+    // Using centralized cache manager now
   }
 
   /**
-   * Get unassigned chat groups (queue) - Optimized with proper relationships
+   * Get unassigned chat groups (queue) - Optimized with caching
    */
   async getUnassignedChatGroups(userId) {
-    // First get user's department IDs with caching
-    const userDeptIds = await this.getCachedUserDepartments(userId);
-    
-    if (!userDeptIds || userDeptIds.length === 0) {
+    try {
+      // Get user's department IDs with caching
+      const userDeptIds = await this.getCachedUserDepartments(userId);
+      
+      if (!userDeptIds || userDeptIds.length === 0) {
+        return [];
+      }
+
+      // Single optimized query for chat groups in user's departments (queued + transferred)
+      const { data: groups, error } = await supabase
+        .from("chat_group")
+        .select(`
+          chat_group_id,
+          dept_id,
+          status,
+          department:department(dept_name),
+          client:client!chat_group_client_id_fkey(
+            client_id,
+            client_number,
+            prof_id,
+            profile:profile(
+              prof_firstname,
+              prof_lastname
+            )
+          )
+        `)
+        .or(`and(status.eq.queued,sys_user_id.is.null),and(status.eq.transferred,sys_user_id.is.null)`)
+        .in("dept_id", userDeptIds)
+        .not("client_id", "is", null); // Only groups with clients
+
+      if (error) throw error;
+      return groups || [];
+    } catch (error) {
+      console.error('❌ Error fetching unassigned chat groups:', error.message);
       return [];
     }
-
-    // Single optimized query for chat groups in user's departments (queued + transferred)
-    const { data: groups, error } = await supabase
-      .from("chat_group")
-      .select(`
-        chat_group_id,
-        dept_id,
-        status,
-        department:department(dept_name),
-        client:client!chat_group_client_id_fkey(
-          client_id,
-          client_number,
-          prof_id,
-          profile:profile(
-            prof_firstname,
-            prof_lastname
-          )
-        )
-      `)
-      .or(`and(status.eq.queued,sys_user_id.is.null),and(status.eq.transferred,sys_user_id.is.null)`)
-      .in("dept_id", userDeptIds)
-      .not("client_id", "is", null); // Only groups with clients
-
-    if (error) throw error;
-    return groups || [];
   }
 
-  /**
-   * Get profile images for multiple profile IDs - Optimized single query
-   */
   async getProfileImages(profIds) {
     if (!profIds || profIds.length === 0) return {};
 
@@ -72,9 +74,6 @@ class QueueService {
     return imageMap;
   }
 
-  /**
-   * Get latest message timestamp for chat groups - Optimized query with proper sorting
-   */
   async getLatestMessageTimes(chatGroupIds) {
     if (!chatGroupIds || chatGroupIds.length === 0) return {};
 
@@ -104,31 +103,33 @@ class QueueService {
   }
 
   /**
-   * Get cached user departments to avoid repeated queries
+   * Get cached user departments using Redis
    */
   async getCachedUserDepartments(userId) {
-    const cacheKey = `user_depts_${userId}`;
-    const cached = this.departmentCache.get(cacheKey);
-    
-    if (cached && Date.now() - cached.timestamp < this.cacheExpiry) {
-      return cached.data;
+    try {
+      const cacheKey = `user_depts_${userId}`;
+      let deptIds = await cacheService.cache.get('USER_PROFILE', cacheKey);
+      
+      if (!deptIds) {
+        // Cache miss - fetch from database
+        const { data: userDepartments, error } = await supabase
+          .from("sys_user_department")
+          .select("dept_id")
+          .eq("sys_user_id", userId);
+
+        if (error) throw error;
+
+        deptIds = (userDepartments || []).map(d => d.dept_id);
+        
+        // Cache for 10 minutes (departments don't change often)
+        await cacheService.cache.set('USER_PROFILE', cacheKey, deptIds, 600);
+      }
+
+      return deptIds;
+    } catch (error) {
+      console.error('❌ Error getting user departments:', error.message);
+      return [];
     }
-
-    const { data: userDepartments, error } = await supabase
-      .from("sys_user_department")
-      .select("dept_id")
-      .eq("sys_user_id", userId);
-
-    if (error) throw error;
-
-    const deptIds = (userDepartments || []).map(d => d.dept_id);
-    
-    this.departmentCache.set(cacheKey, {
-      data: deptIds,
-      timestamp: Date.now()
-    });
-
-    return deptIds;
   }
 
   /**
@@ -161,50 +162,53 @@ class QueueService {
    * Accept chat - assign to user and set status to active
    */
   async acceptChat(chatGroupId, userId) {
-    const { data, error } = await supabase
-      .from("chat_group")
-      .update({ 
-        sys_user_id: userId,
-        status: "active"
-      })
-      .eq("chat_group_id", chatGroupId)
-      .in("status", ["queued", "transferred"]) // Accept both queued and transferred chats
-      .is("sys_user_id", null)
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from("chat_group")
+        .update({ 
+          sys_user_id: userId,
+          status: "active"
+        })
+        .eq("chat_group_id", chatGroupId)
+        .in("status", ["queued", "transferred"]) // Accept both queued and transferred chats
+        .is("sys_user_id", null)
+        .select()
+        .single();
 
-    if (error) throw error;
-    
-    if (!data) {
-      throw new Error("Chat group not found or already assigned");
+      if (error) throw error;
+      
+      if (!data) {
+        throw new Error("Chat group not found or already assigned");
+      }
+
+      // Invalidate related caches
+      await cacheService.invalidateChatGroup(chatGroupId);
+      
+      // Invalidate user's chat groups cache
+      const userCacheKey = `user_chat_groups_${userId}`;
+      await cacheService.cache.delete('CHAT_GROUP', userCacheKey);
+
+      return data;
+    } catch (error) {
+      console.error('❌ Error accepting chat:', error.message);
+      throw error;
     }
-
-    return data;
   }
 
   /**
-   * Check if user is assigned to chat group
+   * Clear department cache for a specific user
    */
-  async checkUserChatGroupLink(userId, chatGroupId) {
-    const { data, error } = await supabase
-      .from("chat_group")
-      .select("chat_group_id")
-      .eq("sys_user_id", userId)
-      .eq("chat_group_id", chatGroupId)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
-  }
-
-  /**
-   * Clear department cache for a specific user or all users
-   */
-  clearDepartmentCache(userId = null) {
-    if (userId) {
-      this.departmentCache.delete(`user_depts_${userId}`);
-    } else {
-      this.departmentCache.clear();
+  async clearDepartmentCache(userId = null) {
+    try {
+      if (userId) {
+        const cacheKey = `user_depts_${userId}`;
+        await cacheService.cache.delete('USER_PROFILE', cacheKey);
+      } else {
+        // Clear all user department caches (would need pattern delete)
+        console.log('🧹 Individual user department caches will expire naturally');
+      }
+    } catch (error) {
+      console.error('❌ Error clearing department cache:', error.message);
     }
   }
 

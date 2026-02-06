@@ -1,113 +1,100 @@
 const supabase = require("../helpers/supabaseClient");
+const cacheService = require("./cache.service");
 const cookie = require("cookie");
 
 class ChatService {
   constructor() {
-    this.userRoleCache = new Map();
-    this.cacheExpiry = 10 * 60 * 1000; // 10 minutes for user roles (stable data)
+    // Using centralized cache manager now
   }
 
   /**
    * Get canned messages for a specific role filtered by user's assigned departments
    */
   async getCannedMessagesByRole(roleId, userId = null) {
-    let query = supabase
-      .from("canned_message")
-      .select("canned_id, canned_message, dept_id")
-      .eq("role_id", roleId)
-      .eq("canned_is_active", true);
-
-    // If userId is provided, filter by user's assigned departments
-    if (userId) {
-      // Get user's assigned departments
-      const { data: userDepartments, error: deptError } = await supabase
-        .from("sys_user_department")
-        .select("dept_id")
-        .eq("sys_user_id", userId);
-
-      if (deptError) {
-        console.error("Error fetching user departments:", deptError);
-        // If error fetching departments, fall back to all messages for the role
-      } else if (userDepartments && userDepartments.length > 0) {
-        const deptIds = userDepartments.map(d => d.dept_id);
-        
-        // Filter canned messages by user's departments OR messages with no department (dept_id is null)
-        query = query.or(`dept_id.in.(${deptIds.join(",")}),dept_id.is.null`);
-        
-        console.log(`🏢 Filtering canned messages for user ${userId} by departments: [${deptIds.join(", ")}] + global messages`);
-      } else {
-        // User has no assigned departments, only show global messages (dept_id is null)
-        query = query.is("dept_id", null);
-        console.log(`🏢 User ${userId} has no assigned departments, showing only global canned messages`);
-      }
+    try {
+      const messages = await cacheService.getCannedMessages(roleId, userId);
+      console.log(`📝 Found ${messages?.length || 0} canned messages for role ${roleId}${userId ? ` and user ${userId}` : ''}`);
+      return messages;
+    } catch (error) {
+      console.error('❌ Error fetching canned messages:', error.message);
+      return [];
     }
-
-    const { data: messages, error } = await query;
-
-    if (error) throw error;
-    
-    console.log(`📝 Found ${messages?.length || 0} canned messages for role ${roleId}${userId ? ` and user ${userId}` : ''}`);
-    return messages || [];
   }
 
   /**
    * Get user's role ID with caching
    */
   async getUserRole(userId) {
-    const cacheKey = `user_role_${userId}`;
-    const cached = this.userRoleCache.get(cacheKey);
-    
-    if (cached && Date.now() - cached.timestamp < this.cacheExpiry) {
-      return cached.data;
+    try {
+      // Try to get from user profile cache first
+      const profile = await cacheService.getUserProfile(userId, 'agent');
+      if (profile && profile.role_id) {
+        return profile.role_id;
+      }
+
+      // Fallback to direct database query
+      const { data: userData, error: userError } = await supabase
+        .from("sys_user")
+        .select("role_id")
+        .eq("sys_user_id", userId)
+        .single();
+
+      if (userError || !userData) {
+        throw new Error("User not found or no role.");
+      }
+
+      return userData.role_id;
+    } catch (error) {
+      console.error('❌ Error fetching user role:', error.message);
+      throw error;
     }
-
-    const { data: userData, error: userError } = await supabase
-      .from("sys_user")
-      .select("role_id")
-      .eq("sys_user_id", userId)
-      .single();
-
-    if (userError || !userData) {
-      throw new Error("User not found or no role.");
-    }
-
-    // Cache the role ID
-    this.userRoleCache.set(cacheKey, {
-      data: userData.role_id,
-      timestamp: Date.now()
-    });
-
-    return userData.role_id;
   }
 
   /**
    * Get all active chat groups for a user (only active chats)
    */
   async getChatGroupsByUser(userId) {
-    // Get only active chats assigned to user
-    const { data: groups, error } = await supabase
-      .from("chat_group")
-      .select(`
-        chat_group_id,
-        dept_id,
-        sys_user_id,
-        status,
-        department:department(dept_name),
-        client:client!chat_group_client_id_fkey(
-          client_id,
-          client_number,
-          prof_id,
-          profile:profile(
-            prof_firstname,
-            prof_lastname
-          )
-        )
-      `)
-      .eq("status", "active")
-      .eq("sys_user_id", userId);
+    try {
+      // Try to get from cache first
+      const cacheKey = `user_chat_groups_${userId}`;
+      let groups = await cacheService.cache.get('CHAT_GROUP', cacheKey);
+      
+      if (!groups) {
+        // Cache miss - fetch from database
+        const { data, error } = await supabase
+          .from("chat_group")
+          .select(`
+            chat_group_id,
+            dept_id,
+            sys_user_id,
+            status,
+            department:department(dept_name),
+            client:client!chat_group_client_id_fkey(
+              client_id,
+              client_number,
+              prof_id,
+              profile:profile(
+                prof_firstname,
+                prof_lastname
+              )
+            )
+          `)
+          .eq("status", "active")
+          .eq("sys_user_id", userId);
 
-    if (error) throw error;
-    return groups || [];
+        if (error) throw error;
+        
+        groups = data || [];
+        
+        // Cache for 5 minutes (chat groups change frequently)
+        await cacheService.cache.set('CHAT_GROUP', cacheKey, groups, 300);
+      }
+      
+      return groups;
+    } catch (error) {
+      console.error('❌ Error fetching chat groups:', error.message);
+      return [];
+    }
   }
 
   /**
@@ -184,83 +171,122 @@ class ChatService {
   }
 
   /**
-   * Get chat messages with pagination and sender information - Optimized single query
+   * Get chat messages with pagination and sender information - Optimized with caching
    */
   async getChatMessages(clientId, before = null, limit = 10, currentUserId = null) {
-    const groups = await this.getChatGroupsByClient(clientId);
-    
-    if (groups.length === 0) {
-      throw new Error("Chat group not found");
-    }
+    try {
+      const groups = await this.getChatGroupsByClient(clientId);
+      
+      if (groups.length === 0) {
+        throw new Error("Chat group not found");
+      }
 
-    const groupIds = groups.map((g) => g.chat_group_id);
+      const groupIds = groups.map((g) => g.chat_group_id);
+      
+      // Try to get recent messages from cache first
+      let cachedMessages = [];
+      if (!before && limit <= 50) {
+        // Only use cache for recent messages (no pagination)
+        for (const groupId of groupIds) {
+          const messages = await cacheService.getChatMessages(groupId);
+          cachedMessages.push(...messages);
+        }
+        
+        if (cachedMessages.length > 0) {
+          // Sort and limit cached messages
+          cachedMessages.sort((a, b) => new Date(b.chat_created_at) - new Date(a.chat_created_at));
+          const limitedMessages = cachedMessages.slice(0, limit);
+          
+          // Process cached messages
+          return limitedMessages.map((msg) => ({
+            ...msg,
+            sender_type: this.determineSenderType(msg, currentUserId),
+            sender_name: this.getSenderName(msg),
+            sender_image: this.getSenderImageOptimized(msg)
+          })).reverse();
+        }
+      }
 
-    // Single optimized query with all necessary joins
-    let query = supabase
-      .from("chat")
-      .select(`
-        chat_id,
-        chat_body,
-        chat_created_at,
-        chat_group_id,
-        client_id,
-        sys_user_id,
-        sys_user:sys_user(
-          sys_user_id,
-          prof_id,
-          profile:profile(
-            prof_firstname, 
-            prof_lastname,
-            image:image!prof_id(
-              img_location,
-              img_is_current
-            )
-          )
-        ),
-        client:client(
+      // Cache miss or pagination - fetch from database
+      let query = supabase
+        .from("chat")
+        .select(`
+          chat_id,
+          chat_body,
+          chat_created_at,
+          chat_group_id,
           client_id,
-          prof_id,
-          profile:profile(
-            prof_firstname,
-            prof_lastname,
-            image:image!prof_id(
-              img_location,
-              img_is_current
+          sys_user_id,
+          sys_user:sys_user(
+            sys_user_id,
+            prof_id,
+            profile:profile(
+              prof_firstname, 
+              prof_lastname,
+              image:image!prof_id(
+                img_location,
+                img_is_current
+              )
+            )
+          ),
+          client:client(
+            client_id,
+            prof_id,
+            profile:profile(
+              prof_firstname,
+              prof_lastname,
+              image:image!prof_id(
+                img_location,
+                img_is_current
+              )
             )
           )
-        )
-      `)
-      .or([
-        `client_id.eq.${clientId}`,
-        `chat_group_id.in.(${groupIds.join(",")})`,
-      ].join(","))
-      .order("chat_created_at", { ascending: false })
-      .limit(parseInt(limit, 10));
+        `)
+        .or([
+          `client_id.eq.${clientId}`,
+          `chat_group_id.in.(${groupIds.join(",")})`,
+        ].join(","))
+        .order("chat_created_at", { ascending: false })
+        .limit(parseInt(limit, 10));
 
-    if (before) {
-      query = query.lt("chat_created_at", before);
+      if (before) {
+        query = query.lt("chat_created_at", before);
+      }
+
+      const { data: rows, error: chatErr } = await query;
+      if (chatErr) throw chatErr;
+
+      // Deduplicate messages and process in single pass
+      const seen = new Set();
+      const messages = (rows || [])
+        .filter((r) => {
+          if (seen.has(r.chat_id)) return false;
+          seen.add(r.chat_id);
+          return true;
+        })
+        .map((msg) => ({
+          ...msg,
+          sender_type: this.determineSenderType(msg, currentUserId),
+          sender_name: this.getSenderName(msg),
+          sender_image: this.getSenderImageOptimized(msg)
+        }))
+        .reverse();
+
+      // Cache recent messages if this was a fresh fetch
+      if (!before && messages.length > 0) {
+        for (const groupId of groupIds) {
+          const groupMessages = messages.filter(m => m.chat_group_id === groupId);
+          if (groupMessages.length > 0) {
+            await cacheService.cacheChatMessages(groupId, groupMessages);
+          }
+        }
+      }
+
+      return messages;
+    } catch (error) {
+      console.error('❌ Error fetching chat messages:', error.message);
+      throw error;
     }
-
-    const { data: rows, error: chatErr } = await query;
-    if (chatErr) throw chatErr;
-
-    // Deduplicate messages and process in single pass
-    const seen = new Set();
-    const messages = (rows || [])
-      .filter((r) => {
-        if (seen.has(r.chat_id)) return false;
-        seen.add(r.chat_id);
-        return true;
-      })
-      .map((msg) => ({
-        ...msg,
-        sender_type: this.determineSenderType(msg, currentUserId),
-        sender_name: this.getSenderName(msg),
-        sender_image: this.getSenderImageOptimized(msg)
-      }))
-      .reverse();
-
-    return messages;
   }
 
   /**
@@ -362,52 +388,89 @@ class ChatService {
   }
 
   /**
-   * Clear user role cache for a specific user or all users
-   */
-  clearUserRoleCache(userId = null) {
-    if (userId) {
-      this.userRoleCache.delete(`user_role_${userId}`);
-    } else {
-      this.userRoleCache.clear();
-    }
-  }
-
-  /**
    * Insert a new chat message
    */
   async insertMessage(messageData) {
-    const { data, error: insertError } = await supabase
-      .from("chat")
-      .insert([messageData])
-      .select("*");
+    try {
+      const { data, error: insertError } = await supabase
+        .from("chat")
+        .insert([messageData])
+        .select("*");
 
-    if (insertError) throw insertError;
-    return data && data.length > 0 ? data[0] : null;
+      if (insertError) throw insertError;
+      
+      const newMessage = data && data.length > 0 ? data[0] : null;
+      
+      // Invalidate chat message cache for this group
+      if (newMessage && newMessage.chat_group_id) {
+        await cacheService.invalidateChatMessages(newMessage.chat_group_id);
+        
+        // Also invalidate user's chat groups cache if they're assigned
+        if (newMessage.sys_user_id) {
+          const cacheKey = `user_chat_groups_${newMessage.sys_user_id}`;
+          await cacheService.cache.delete('CHAT_GROUP', cacheKey);
+        }
+      }
+      
+      return newMessage;
+    } catch (error) {
+      console.error('❌ Error inserting message:', error.message);
+      throw error;
+    }
   }
 
   /**
    * Transfer chat group to another department
    */
   async transferChatGroup(chatGroupId, deptId, userId) {
-    const { data, error } = await supabase
-      .from("chat_group")
-      .update({
-        status: "transferred",
-        sys_user_id: null,
-        dept_id: deptId
-      })
-      .eq("chat_group_id", chatGroupId)
-      .eq("sys_user_id", userId) // Ensure only the assigned user can transfer
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from("chat_group")
+        .update({
+          status: "transferred",
+          sys_user_id: null,
+          dept_id: deptId
+        })
+        .eq("chat_group_id", chatGroupId)
+        .eq("sys_user_id", userId) // Ensure only the assigned user can transfer
+        .select()
+        .single();
 
-    if (error) throw error;
-    
-    if (!data) {
-      throw new Error("Chat group not found or you don't have permission to transfer it");
+      if (error) throw error;
+      
+      if (!data) {
+        throw new Error("Chat group not found or you don't have permission to transfer it");
+      }
+
+      // Invalidate related caches
+      await cacheService.invalidateChatGroup(chatGroupId);
+      await cacheService.invalidateChatMessages(chatGroupId);
+      
+      // Invalidate user's chat groups cache
+      const userCacheKey = `user_chat_groups_${userId}`;
+      await cacheService.cache.delete('CHAT_GROUP', userCacheKey);
+
+      return data;
+    } catch (error) {
+      console.error('❌ Error transferring chat group:', error.message);
+      throw error;
     }
+  }
 
-    return data;
+  /**
+   * Clear user-related caches (for cache invalidation)
+   */
+  async clearUserCache(userId) {
+    try {
+      await cacheService.invalidateUserProfile(userId, 'agent');
+      
+      const userCacheKey = `user_chat_groups_${userId}`;
+      await cacheService.cache.delete('CHAT_GROUP', userCacheKey);
+      
+      console.log(`🧹 Cleared cache for user ${userId}`);
+    } catch (error) {
+      console.error('❌ Error clearing user cache:', error.message);
+    }
   }
 }
 

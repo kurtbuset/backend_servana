@@ -1,7 +1,9 @@
 const supabase = require('../helpers/supabaseClient');
+const cacheService = require('../services/cache.service');
 
 /**
  * User Status Manager - Handles cleanup and maintenance of online users
+ * Now uses centralized cache manager
  */
 class UserStatusManager {
   constructor(io, userStatusHandlers) {
@@ -19,7 +21,6 @@ class UserStatusManager {
     this.startCleanupJob();
     this.startRoomStatsLogging();
     this.startRateLimitCleanup();
-    console.log('✅ User Status Manager started');
   }
 
   /**
@@ -40,8 +41,6 @@ class UserStatusManager {
       clearInterval(this.rateLimitCleanupInterval);
       this.rateLimitCleanupInterval = null;
     }
-    
-    console.log('🛑 User Status Manager stopped');
   }
 
   /**
@@ -50,7 +49,7 @@ class UserStatusManager {
   startCleanupJob() {
     this.cleanupInterval = setInterval(() => {
       this.cleanupStaleUsers();
-    }, 10000); // Run every 10 seconds (reduced from 60s for faster cleanup)
+    }, 10000); // Run every 10 seconds
   }
 
   /**
@@ -63,12 +62,12 @@ class UserStatusManager {
   }
 
   /**
-   * Start rate limit cleanup job: Clean up expired rate limit data every 5 minutes
+   * Start rate limit cleanup job
    */
   startRateLimitCleanup() {
-    this.rateLimitCleanupInterval = setInterval(() => {
-      this.userStatusHandlers.cleanupRateLimits();
-      console.log('🧹 Rate limit data cleaned up');
+    this.rateLimitCleanupInterval = setInterval(async () => {
+      await cacheService.cleanup();
+      console.log('🧹 Cache cleanup completed');
     }, 300000); // Run every 5 minutes
   }
 
@@ -77,25 +76,24 @@ class UserStatusManager {
    */
   async cleanupStaleUsers() {
     const now = new Date();
-    const staleThreshold = 45000; // 45 seconds (reduced from 60s for faster cleanup)
-    const onlineUsers = this.userStatusHandlers.getOnlineUsers();
+    const staleThreshold = 45000; // 45 seconds
+    const onlineUsers = await cacheService.getOnlineUsers();
     
     const staleUsers = [];
     
-    onlineUsers.forEach((userData, userId) => {
-      const timeSinceLastSeen = now - userData.lastSeen;
+    for (const [userId, userData] of Object.entries(onlineUsers)) {
+      const lastSeen = new Date(userData.lastSeen);
+      const timeSinceLastSeen = now - lastSeen;
       
       if (timeSinceLastSeen > staleThreshold) {
         staleUsers.push({ userId, userData, timeSinceLastSeen });
       }
-    });
+    }
 
     // Process stale users
     for (const { userId, userData, timeSinceLastSeen } of staleUsers) {
-      console.log(`🧹 Cleaning up stale user ${userId} (last seen ${Math.floor(timeSinceLastSeen / 1000)}s ago)`);
-      
-      // Remove from online users
-      onlineUsers.delete(userId);
+      // Set user offline in cache
+      await cacheService.setUserOffline(userId);
       
       // Broadcast offline status
       this.io.emit('userStatusChanged', {
@@ -108,23 +106,18 @@ class UserStatusManager {
       try {
         await supabase
           .from('sys_user')
-          .update({ last_seen: userData.lastSeen.toISOString() })
+          .update({ last_seen: new Date(userData.lastSeen).toISOString() })
           .eq('sys_user_id', userId);
-        console.log(`💾 Updated stale user ${userId} in database`);
       } catch (err) {
         console.error('❌ Error updating stale user:', err);
       }
-    }
-
-    if (staleUsers.length > 0) {
-      console.log(`🧹 Cleaned up ${staleUsers.length} stale users. Online users: ${onlineUsers.size}`);
     }
   }
 
   /**
    * Log room statistics for monitoring
    */
-  logRoomStatistics() {
+  async logRoomStatistics() {
     const rooms = this.io.sockets.adapter.rooms;
     const activeRooms = [];
     
@@ -138,22 +131,23 @@ class UserStatusManager {
       }
     });
 
-    if (activeRooms.length > 0) {
-      const onlineUsersCount = this.userStatusHandlers.getOnlineUsersCount();
+    // Only log if there are active rooms to avoid spam
+    if (activeRooms.length > 5) {
+      const onlineUsers = await cacheService.getOnlineUsers();
+      const onlineUsersCount = Object.keys(onlineUsers).length;
       console.log(`📊 Active Rooms: ${activeRooms.length}, Total Users: ${this.io.sockets.sockets.size}, Online Users: ${onlineUsersCount}`);
-      console.log('Room Details:', activeRooms);
     }
   }
 
   /**
    * Get comprehensive status statistics
    */
-  getStatusStatistics() {
-    const onlineUsers = this.userStatusHandlers.getOnlineUsers();
+  async getStatusStatistics() {
+    const onlineUsers = await cacheService.getOnlineUsers();
     const rooms = this.io.sockets.adapter.rooms;
     
     const stats = {
-      onlineUsers: onlineUsers.size,
+      onlineUsers: Object.keys(onlineUsers).length,
       totalConnections: this.io.sockets.sockets.size,
       activeRooms: 0,
       roomDetails: [],
@@ -165,7 +159,7 @@ class UserStatusManager {
     };
 
     // Count user types
-    onlineUsers.forEach((userData) => {
+    Object.values(onlineUsers).forEach((userData) => {
       const userType = userData.userType || 'unknown';
       stats.userTypes[userType] = (stats.userTypes[userType] || 0) + 1;
     });
@@ -188,15 +182,13 @@ class UserStatusManager {
    * Force cleanup of a specific user
    */
   async forceUserOffline(userId, reason = 'Manual cleanup') {
-    const onlineUsers = this.userStatusHandlers.getOnlineUsers();
+    const onlineUsers = await cacheService.getOnlineUsers();
     
-    if (onlineUsers.has(userId)) {
-      const userData = onlineUsers.get(userId);
-      onlineUsers.delete(userId);
-      
+    if (onlineUsers[userId]) {
       const lastSeen = new Date();
       
-      console.log(`🔧 Force offline user ${userId}: ${reason}`);
+      // Set user offline in cache
+      await cacheService.setUserOffline(userId);
       
       // Broadcast offline status
       this.io.emit('userStatusChanged', {
@@ -211,7 +203,6 @@ class UserStatusManager {
           .from('sys_user')
           .update({ last_seen: lastSeen.toISOString() })
           .eq('sys_user_id', userId);
-        console.log(`💾 Updated force-offline user ${userId} in database`);
       } catch (err) {
         console.error('❌ Error updating force-offline user:', err);
       }

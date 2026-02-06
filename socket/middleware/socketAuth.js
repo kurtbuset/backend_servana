@@ -20,15 +20,11 @@ class SocketAuthMiddleware {
    */
   async authenticate(socket, next) {
     try {
-      console.log(`🔐 [USER_STATUS] Authenticating socket ${socket.id}...`);
-      
       // 1. Detect client type (web/mobile)
       const clientType = this.detectClientType(socket);
       
       // 2. Route to appropriate auth method
       const authResult = await this.authenticateByType(socket, clientType);
-      
-      console.log(`✅ [USER_STATUS] Authentication successful for socket ${socket.id}, user: ${authResult.userId} (${authResult.userType})`);
       
       // 3. Validate user context and permissions
       const userContext = await this.validateUserContext(authResult);
@@ -72,17 +68,13 @@ class SocketAuthMiddleware {
   detectClientType(socket) {
     const headers = socket.handshake.headers;
     
-    console.log(`🔍 [USER_STATUS] Detecting client type for socket ${socket.id}`);
-    
     // Check for JWT in Authorization header (mobile)
     if (headers.authorization && headers.authorization.startsWith('Bearer ')) {
-      console.log(`📱 [USER_STATUS] Mobile client detected for socket ${socket.id}`);
       return 'mobile';
     }
     
     // Check for cookies (web)
     if (headers.cookie && headers.cookie.includes('access_token')) {
-      console.log(`🌐 [USER_STATUS] Web client detected for socket ${socket.id}`);
       return 'web';
     }
     
