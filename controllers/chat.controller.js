@@ -34,7 +34,7 @@ class ChatController {
 
       // Use cached user role lookup
       const roleId = await chatService.getUserRole(userId);
-      const messages = await chatService.getCannedMessagesByRole(roleId);
+      const messages = await chatService.getCannedMessagesByRole(roleId, userId);
 
       res.json(messages);
     } catch (err) {

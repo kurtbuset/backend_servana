@@ -1,5 +1,6 @@
 const express = require("express");
 const authService = require("../services/auth.service");
+const sessionService = require("../services/session.service");
 
 class AuthController {
   getRouter() {
@@ -13,6 +14,9 @@ class AuthController {
 
     // Get user ID
     router.get("/user-id", (req, res) => this.getUserId(req, res));
+
+    // Check Redis session
+    router.get("/session", (req, res) => this.checkSession(req, res));
 
     // Logout
     router.post("/logout", (req, res) => this.logout(req, res));
@@ -34,7 +38,27 @@ class AuthController {
         return res.status(500).json({ error: "Login failed" });
       }
 
-      // Set secure cookies
+      // Link with system_user
+      const sysUser = await authService.getSystemUserBySupabaseId(user.id);
+
+      // Create Redis session
+      const redisClient = req.app.get('redis');
+      let sessionId = null;
+      
+      if (redisClient) {
+        try {
+          sessionId = await sessionService.createSession(redisClient, sysUser.sys_user_id, {
+            email: user.email,
+            role_id: sysUser.role_id,
+            supabase_id: user.id
+          });
+          console.log(`🔑 Created Redis session: ${sessionId} for user: ${sysUser.sys_user_id}`);
+        } catch (error) {
+          console.error('⚠️ Failed to create Redis session:', error.message);
+        }
+      }
+
+      // Set secure cookies (keeping original JWT approach)
       res.cookie("access_token", session.access_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -49,12 +73,20 @@ class AuthController {
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       });
 
-      // Link with system_user
-      const sysUser = await authService.getSystemUserBySupabaseId(user.id);
+      // Also set Redis session ID cookie
+      if (sessionId) {
+        res.cookie("session_id", sessionId, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+          maxAge: 24 * 60 * 60 * 1000, // 1 day
+        });
+      }
 
       res.json({
         message: "Login successful",
         user: { sys_user_id: sysUser.sys_user_id, role_id: sysUser.role_id },
+        session_id: sessionId // Include session ID in response
       });
     } catch (err) {
       console.error("Login error:", err.message);
@@ -111,23 +143,85 @@ class AuthController {
   }
 
   /**
+   * Check Redis session status
+   */
+  async checkSession(req, res) {
+    try {
+      const sessionId = req.cookies.session_id;
+      const redisClient = req.app.get('redis');
+
+      if (!redisClient) {
+        return res.status(503).json({ error: "Redis not available" });
+      }
+
+      if (!sessionId) {
+        return res.status(401).json({ error: "No session ID found" });
+      }
+
+      const sessionData = await sessionService.getSession(redisClient, sessionId);
+
+      if (!sessionData) {
+        return res.status(401).json({ error: "Session expired or invalid" });
+      }
+
+      res.json({
+        message: "Session valid",
+        session: {
+          userId: sessionData.userId,
+          email: sessionData.email,
+          role_id: sessionData.role_id,
+          createdAt: sessionData.createdAt,
+          lastAccessed: sessionData.lastAccessed
+        }
+      });
+    } catch (error) {
+      console.error("Check session error:", error.message);
+      res.status(500).json({ error: "Session check failed" });
+    }
+  }
+
+  /**
    * Logout user
    */
-  logout(req, res) {
-    // Clear cookies with the same options used when setting them
-    res.clearCookie("access_token", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-    });
+  async logout(req, res) {
+    try {
+      const sessionId = req.cookies.session_id;
+      const redisClient = req.app.get('redis');
 
-    res.clearCookie("refresh_token", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-    });
+      // Delete Redis session if it exists
+      if (redisClient && sessionId) {
+        try {
+          await sessionService.deleteSession(redisClient, sessionId);
+          console.log(`🔑 Deleted Redis session: ${sessionId}`);
+        } catch (error) {
+          console.error('⚠️ Failed to delete Redis session:', error.message);
+        }
+      }
 
-    res.json({ message: "Logged out" });
+      // Clear cookies with the same options used when setting them
+      res.clearCookie("access_token", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+      });
+
+      res.clearCookie("refresh_token", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+      });
+
+      res.clearCookie("session_id", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+      });
+
+      res.json({ message: "Logged out" });
+    } catch (error) {
+      console.error("Logout error:", error.message);
+      res.status(500).json({ error: "Logout failed" });
+    }
   }
 }
 

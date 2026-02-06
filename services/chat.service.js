@@ -8,17 +8,46 @@ class ChatService {
   }
 
   /**
-   * Get canned messages for a specific role
+   * Get canned messages for a specific role filtered by user's assigned departments
    */
-  async getCannedMessagesByRole(roleId) {
-    const { data: messages, error } = await supabase
+  async getCannedMessagesByRole(roleId, userId = null) {
+    let query = supabase
       .from("canned_message")
-      .select("canned_id, canned_message")
+      .select("canned_id, canned_message, dept_id")
       .eq("role_id", roleId)
       .eq("canned_is_active", true);
 
+    // If userId is provided, filter by user's assigned departments
+    if (userId) {
+      // Get user's assigned departments
+      const { data: userDepartments, error: deptError } = await supabase
+        .from("sys_user_department")
+        .select("dept_id")
+        .eq("sys_user_id", userId);
+
+      if (deptError) {
+        console.error("Error fetching user departments:", deptError);
+        // If error fetching departments, fall back to all messages for the role
+      } else if (userDepartments && userDepartments.length > 0) {
+        const deptIds = userDepartments.map(d => d.dept_id);
+        
+        // Filter canned messages by user's departments OR messages with no department (dept_id is null)
+        query = query.or(`dept_id.in.(${deptIds.join(",")}),dept_id.is.null`);
+        
+        console.log(`🏢 Filtering canned messages for user ${userId} by departments: [${deptIds.join(", ")}] + global messages`);
+      } else {
+        // User has no assigned departments, only show global messages (dept_id is null)
+        query = query.is("dept_id", null);
+        console.log(`🏢 User ${userId} has no assigned departments, showing only global canned messages`);
+      }
+    }
+
+    const { data: messages, error } = await query;
+
     if (error) throw error;
-    return messages;
+    
+    console.log(`📝 Found ${messages?.length || 0} canned messages for role ${roleId}${userId ? ` and user ${userId}` : ''}`);
+    return messages || [];
   }
 
   /**
