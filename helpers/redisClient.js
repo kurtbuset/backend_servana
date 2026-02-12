@@ -19,6 +19,9 @@ class RedisCacheManager {
       CHAT_GROUP: 'chat_group:',
       DEPARTMENT: 'department:',
       ROLE: 'role:',
+      AGENT: 'agent:',
+      AUTO_REPLY: 'auto_reply:',
+      CHANGE_ROLE: 'change_role:',
       CANNED_MESSAGES: 'canned_messages:',
       ONLINE_USERS: 'online_users:',
       USER_STATUS: 'user_status:',
@@ -33,8 +36,11 @@ class RedisCacheManager {
       USER_PROFILE: 60 * 60,           // 1 hour
       CHAT_MESSAGES: 2 * 60 * 60,      // 2 hours
       CHAT_GROUP: 30 * 60,             // 30 minutes
-      DEPARTMENT: 24 * 60 * 60,        // 24 hours (rarely changes)
+      DEPARTMENT: 4 * 60 * 60,         // 4 hours (write-through cache strategy)
       ROLE: 24 * 60 * 60,              // 24 hours (rarely changes)
+      AGENT: 2 * 60 * 60,              // 2 hours (moderate change frequency)
+      AUTO_REPLY: 2 * 60 * 60,         // 2 hours (moderate change frequency)
+      CHANGE_ROLE: 60 * 60,            // 1 hour (user role changes moderately)
       CANNED_MESSAGES: 60 * 60,        // 1 hour
       ONLINE_USERS: 60,                // 1 minute (real-time data)
       USER_STATUS: 45,                 // 45 seconds (heartbeat data)

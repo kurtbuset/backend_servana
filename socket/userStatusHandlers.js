@@ -1,14 +1,17 @@
 const supabase = require('../helpers/supabaseClient');
-const cacheService = require('../services/cache.service');
 
 /**
  * Socket event handlers for user online/offline status management
- * Now uses centralized Redis cache manager
+ * Redis caching removed - using in-memory storage only
  */
 class UserStatusHandlers {
   constructor(io) {
     this.io = io;
     this.MAX_UPDATES_PER_MINUTE = 10; // Max 10 status updates per minute per user
+    
+    // In-memory storage for user status (replaces Redis)
+    this.onlineUsers = new Map(); // userId -> userData
+    this.rateLimiters = new Map(); // userId -> { count, resetTime }
   }
 
   /**
@@ -43,22 +46,43 @@ class UserStatusHandlers {
   }
 
   /**
-   * Security: Check rate limit for user using Redis
+   * Security: Check rate limit for user using in-memory storage
    */
   async checkRateLimit(userId) {
     try {
-      const rateLimitKey = `user_status_${userId}`;
-      const allowed = await cacheService.checkRateLimit(rateLimitKey, this.MAX_UPDATES_PER_MINUTE, 60);
+      const now = Date.now();
+      const rateLimitData = this.rateLimiters.get(userId);
       
-      if (!allowed) {
-        return { 
-          allowed: false, 
-          error: 'Rate limit exceeded. Too many status updates.',
-          retryAfter: 60
-        };
+      if (!rateLimitData) {
+        // First request for this user
+        this.rateLimiters.set(userId, {
+          count: 1,
+          resetTime: now + 60000 // Reset after 1 minute
+        });
+        return { allowed: true };
       }
       
-      return { allowed: true };
+      // Check if reset time has passed
+      if (now > rateLimitData.resetTime) {
+        // Reset the counter
+        this.rateLimiters.set(userId, {
+          count: 1,
+          resetTime: now + 60000
+        });
+        return { allowed: true };
+      }
+      
+      // Check if under limit
+      if (rateLimitData.count < this.MAX_UPDATES_PER_MINUTE) {
+        rateLimitData.count++;
+        return { allowed: true };
+      }
+      
+      return { 
+        allowed: false, 
+        error: 'Rate limit exceeded. Too many status updates.',
+        retryAfter: Math.ceil((rateLimitData.resetTime - now) / 1000)
+      };
     } catch (error) {
       console.error('❌ Error checking rate limit:', error.message);
       return { allowed: true }; // Allow on error
@@ -146,12 +170,13 @@ class UserStatusHandlers {
       return;
     }
     
-    // All security checks passed - set user online in cache
-    await cacheService.setUserOnline(userId, {
+    // All security checks passed - set user online in memory
+    this.onlineUsers.set(userId, {
       socketId: socket.id,
       lastSeen: new Date(),
       userType,
-      userName
+      userName,
+      status: 'online'
     });
     
     socket.userId = userId;
@@ -205,11 +230,11 @@ class UserStatusHandlers {
     
     const isOnline = await this.isUserOnline(userId);
     if (isOnline) {
-      // Update user status in cache
-      const currentStatus = await cacheService.getUserStatus(userId);
+      // Update user status in memory
+      const currentStatus = this.onlineUsers.get(userId);
       if (currentStatus) {
         const lastSeen = new Date();
-        await cacheService.setUserOnline(userId, {
+        this.onlineUsers.set(userId, {
           ...currentStatus,
           lastSeen,
           socketId: socket.id
@@ -258,7 +283,7 @@ class UserStatusHandlers {
     
     const isOnline = await this.isUserOnline(userId);
     if (isOnline) {
-      await cacheService.setUserOffline(userId);
+      this.onlineUsers.delete(userId);
       
       const lastSeen = new Date();
       
@@ -288,8 +313,7 @@ class UserStatusHandlers {
    */
   async handleGetOnlineUsers(socket) {
     try {
-      const onlineUsers = await cacheService.getOnlineUsers();
-      const onlineUsersList = Object.entries(onlineUsers).map(([userId, data]) => ({
+      const onlineUsersList = Array.from(this.onlineUsers.entries()).map(([userId, data]) => ({
         userId: parseInt(userId),
         status: 'online',
         lastSeen: data.lastSeen,
@@ -313,11 +337,11 @@ class UserStatusHandlers {
       
       const isOnline = await this.isUserOnline(userId);
       if (isOnline) {
-        const userData = await cacheService.getUserStatus(userId);
+        const userData = this.onlineUsers.get(userId);
         
         // Only remove if this socket ID matches
         if (userData && userData.socketId === socket.id) {
-          await cacheService.setUserOffline(userId);
+          this.onlineUsers.delete(userId);
           
           const lastSeen = new Date();
           
@@ -349,7 +373,11 @@ class UserStatusHandlers {
    */
   async getOnlineUsers() {
     try {
-      return await cacheService.getOnlineUsers();
+      const onlineUsersObj = {};
+      for (const [userId, userData] of this.onlineUsers.entries()) {
+        onlineUsersObj[userId] = userData;
+      }
+      return onlineUsersObj;
     } catch (error) {
       console.error('❌ Error getting online users:', error.message);
       return {};
@@ -361,8 +389,7 @@ class UserStatusHandlers {
    */
   async getOnlineUsersCount() {
     try {
-      const onlineUsers = await cacheService.getOnlineUsers();
-      return Object.keys(onlineUsers).length;
+      return this.onlineUsers.size;
     } catch (error) {
       console.error('❌ Error getting online users count:', error.message);
       return 0;
@@ -374,8 +401,7 @@ class UserStatusHandlers {
    */
   async isUserOnline(userId) {
     try {
-      const onlineUsers = await cacheService.getOnlineUsers();
-      return !!onlineUsers[userId];
+      return this.onlineUsers.has(userId);
     } catch (error) {
       console.error('❌ Error checking user online status:', error.message);
       return false;
@@ -383,11 +409,29 @@ class UserStatusHandlers {
   }
 
   /**
-   * Clean up rate limit data (now handled by Redis TTL)
+   * Clean up rate limit data and stale users
    */
   async cleanupRateLimits() {
-    // Rate limits are automatically cleaned up by Redis TTL
-    console.log('🧹 Rate limits cleaned up automatically by Redis TTL');
+    const now = Date.now();
+    
+    // Clean up expired rate limiters
+    for (const [userId, rateLimitData] of this.rateLimiters.entries()) {
+      if (now > rateLimitData.resetTime) {
+        this.rateLimiters.delete(userId);
+      }
+    }
+    
+    // Clean up stale online users (older than 5 minutes)
+    const staleThreshold = 5 * 60 * 1000; // 5 minutes
+    for (const [userId, userData] of this.onlineUsers.entries()) {
+      const timeSinceLastSeen = now - new Date(userData.lastSeen).getTime();
+      if (timeSinceLastSeen > staleThreshold) {
+        this.onlineUsers.delete(userId);
+        console.log(`🧹 Removed stale user ${userId} from online users`);
+      }
+    }
+    
+    console.log('🧹 Rate limits and stale users cleaned up');
   }
 }
 

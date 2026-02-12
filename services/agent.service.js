@@ -1,4 +1,5 @@
 const supabase = require("../helpers/supabaseClient");
+const cacheService = require("./cache.service");
 const profileService = require("./profile.service");
 const roleService = require("./role.service");
 
@@ -11,16 +12,31 @@ const ROLE_NAMES = {
 
 class AgentService {
   /**
-   * Get all agents with their departments and profile pictures
+   * Get all agents with their departments and profile pictures - Redis caching with 2-hour TTL
+   * Cache-first approach: if cache found, return cache data; if not, use business logic for data fetching
    */
   async getAllAgents() {
     try {
+      // Try to get from cache first
+      const cachedAgents = await cacheService.getAgents();
+      
+      if (cachedAgents !== null && cachedAgents !== undefined) {
+        console.log(`✅ Cache HIT: Retrieved ${cachedAgents.length} agents from Redis cache`);
+        return cachedAgents;
+      }
+      
+      // Cache miss - use business logic for data fetching
+      console.log('⚠️ Cache MISS: Fetching agents from database');
+      
       // First, get the agent role ID by role name
+      console.log("🔍 Fetching agent role with name:", ROLE_NAMES.AGENT);
       const { data: agentRole, error: roleError } = await supabase
         .from("role")
         .select("role_id")
         .eq("role_name", ROLE_NAMES.AGENT) // Use constant instead of hardcoded string
         .single();
+
+      console.log("🔍 Agent role query result:", { agentRole, roleError });
 
       if (roleError || !agentRole) {
         console.error("Error fetching agent role:", roleError);
@@ -28,6 +44,7 @@ class AgentService {
       }
 
       // Get all users with agent role including profile
+      console.log("🔍 Fetching users with agent role_id:", agentRole.role_id);
       const { data: users, error: userError } = await supabase
         .from("sys_user")
         .select(`
@@ -40,12 +57,17 @@ class AgentService {
         .eq("role_id", agentRole.role_id)
         .order("sys_user_email", { ascending: true });
 
+      console.log("🔍 Users query result:", { usersCount: users?.length || 0, userError });
+
       if (userError) {
         console.error("Error fetching users:", userError);
         throw userError;
       }
 
       if (!users || users.length === 0) {
+        // Cache empty result to avoid repeated database queries
+        await cacheService.updateAgents([]);
+        console.log('✅ Cached empty agents result with 2-hour TTL');
         return [];
       }
 
@@ -103,18 +125,51 @@ class AgentService {
         };
       });
 
+      // Cache the result for future requests with 2-hour TTL
+      await cacheService.updateAgents(formattedAgents);
+      console.log(`✅ Cached ${formattedAgents.length} agents with 2-hour TTL using write-through strategy`);
+
       return formattedAgents;
     } catch (error) {
-      console.error("Error in getAllAgents:", error);
+      console.error("❌ Error in getAllAgents:", error.message);
+      
+      // Fallback: try to return stale cache data if available
+      try {
+        const staleCachedData = await cacheService.getAgents();
+        if (staleCachedData !== null && staleCachedData !== undefined) {
+          console.log('⚠️ Returning stale cache data due to database error');
+          return staleCachedData;
+        }
+      } catch (cacheError) {
+        console.error('❌ Cache fallback also failed:', cacheError.message);
+      }
+      
       throw error;
     }
   }
 
   /**
-   * Get all active departments
+   * Get all active departments - Redis caching with 4-hour TTL
+   * Cache-first approach: if cache found, return cache data; if not, use business logic for data fetching
    */
   async getActiveDepartments() {
     try {
+      // Try to get from department cache first
+      const cachedDepartments = await cacheService.getDepartments();
+      
+      if (cachedDepartments !== null && cachedDepartments !== undefined) {
+        // Filter active departments and extract names
+        const activeDepartmentNames = cachedDepartments
+          .filter(dept => dept.dept_is_active === true)
+          .map(dept => dept.dept_name)
+          .sort();
+        
+        console.log(`✅ Cache HIT: Retrieved ${activeDepartmentNames.length} active departments from cache`);
+        return activeDepartmentNames;
+      }
+      
+      // Cache miss - use business logic for data fetching
+      console.log('⚠️ Cache MISS: Fetching active departments from database');
       const { data, error } = await supabase
         .from("department")
         .select("dept_name")
@@ -126,9 +181,30 @@ class AgentService {
         throw error;
       }
 
-      return data ? data.map((d) => d.dept_name) : [];
+      const departmentNames = data ? data.map((d) => d.dept_name) : [];
+      
+      // Note: We don't cache here since this is a filtered view of departments
+      // The full department cache is managed by the department service
+      
+      return departmentNames;
     } catch (error) {
-      console.error("Error in getActiveDepartments:", error);
+      console.error("❌ Error in getActiveDepartments:", error.message);
+      
+      // Fallback: try to return stale cache data if available
+      try {
+        const staleCachedData = await cacheService.getDepartments();
+        if (staleCachedData !== null && staleCachedData !== undefined) {
+          const activeDepartmentNames = staleCachedData
+            .filter(dept => dept.dept_is_active === true)
+            .map(dept => dept.dept_name)
+            .sort();
+          console.log('⚠️ Returning stale cache data due to database error');
+          return activeDepartmentNames;
+        }
+      } catch (cacheError) {
+        console.error('❌ Cache fallback also failed:', cacheError.message);
+      }
+      
       throw error;
     }
   }
@@ -148,7 +224,7 @@ class AgentService {
   }
 
   /**
-   * Update system user
+   * Update system user - Write-through caching
    */
   async updateSystemUser(userId, email, isActive) {
     const { error } = await supabase
@@ -161,13 +237,21 @@ class AgentService {
       .eq("sys_user_id", userId);
 
     if (error) throw error;
+    
+    // Invalidate agents cache after update
+    await cacheService.invalidateAgents();
+    console.log("🧹 Invalidated agents cache after system user update");
   }
 
   /**
-   * Delete user departments
+   * Delete user departments - Write-through caching
    */
   async deleteUserDepartments(userId) {
     await supabase.from("sys_user_department").delete().eq("sys_user_id", userId);
+    
+    // Invalidate agents cache after department changes
+    await cacheService.invalidateAgents();
+    console.log("🧹 Invalidated agents cache after user departments deletion");
   }
 
   /**
@@ -184,7 +268,7 @@ class AgentService {
   }
 
   /**
-   * Insert user departments
+   * Insert user departments - Write-through caching
    */
   async insertUserDepartments(userId, departmentIds) {
     const insertRows = departmentIds.map((deptId) => ({
@@ -195,6 +279,10 @@ class AgentService {
     const { error } = await supabase.from("sys_user_department").insert(insertRows);
 
     if (error) throw error;
+    
+    // Invalidate agents cache after department changes
+    await cacheService.invalidateAgents();
+    console.log("🧹 Invalidated agents cache after user departments insertion");
   }
 
   /**
@@ -269,6 +357,10 @@ class AgentService {
         const deptRows = await this.getDepartmentIdsByNames(departments);
         await this.insertUserDepartments(newUserId, deptRows.map((d) => d.dept_id));
       }
+
+      // Invalidate agents cache after successful creation
+      await cacheService.invalidateAgents();
+      console.log("🧹 Invalidated agents cache after agent creation");
 
       return { id: newUserId, email };
 

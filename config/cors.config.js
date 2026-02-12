@@ -1,6 +1,7 @@
 const allowedOrigins = [
   process.env.REACT_WEB_URL || 'http://localhost:5173',
   process.env.REACT_WEB_PRODUCTION_URL,
+  'http://localhost:5173'
 ].filter(Boolean);
 
 const getCorsConfig = () => ({

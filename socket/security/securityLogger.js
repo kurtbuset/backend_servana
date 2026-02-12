@@ -395,9 +395,9 @@ class SecurityLogger {
     const emoji = this.getEventEmoji(logEntry.level);
     const timestamp = new Date(logEntry.timestamp).toLocaleTimeString();
     
-    console.log(`${emoji} [${timestamp}] ${logEntry.eventType} (${logEntry.level})`);
+    // console.log(`${emoji} [${timestamp}] ${logEntry.eventType} (${logEntry.level})`);
     if (logEntry.details && Object.keys(logEntry.details).length > 0) {
-      console.log('   Details:', JSON.stringify(logEntry.details, null, 2));
+      // console.log('Details:', JSON.stringify(logEntry.details, null, 2));
     }
   }
 
@@ -408,7 +408,7 @@ class SecurityLogger {
     switch (level) {
       case 'CRITICAL': return '🚨';
       case 'WARNING': return '⚠️';
-      case 'INFO': return '🔒';
+      case 'INFO': return '🔒'; 
       default: return '📝';
     }
   }

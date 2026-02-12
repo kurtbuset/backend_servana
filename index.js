@@ -27,6 +27,15 @@ app.use(cors(getCorsConfig()));
 // ===========================
 setupRoutes(app);
 
+// Health check endpoint for Docker
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    service: 'servana-backend'
+  });
+});
+
 // ===========================
 // Socket.IO & Server Start
 // ===========================

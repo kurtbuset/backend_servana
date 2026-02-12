@@ -1,9 +1,9 @@
 const { cacheManager } = require('../helpers/redisClient');
-const supabase = require('../helpers/supabaseClient');
 
 /**
  * Cache Service - High-level caching operations for business logic
  * Uses the centralized cache manager for all operations
+ * NOTE: This service only handles caching operations, not database queries
  */
 class CacheService {
   constructor() {
@@ -16,65 +16,12 @@ class CacheService {
   
   async getUserProfile(userId, userType = 'agent') {
     const prefix = userType === 'client' ? 'CLIENT_PROFILE' : 'USER_PROFILE';
-    let profile = await this.cache.get(prefix, userId);
-    
-    if (!profile) {
-      // Cache miss - fetch from database
-      try {
-        if (userType === 'client') {
-          const { data, error } = await supabase
-            .from('client')
-            .select(`
-              client_id,
-              client_number,
-              client_country_code,
-              profile:prof_id (
-                prof_firstname,
-                prof_lastname,
-                prof_address,
-                prof_date_of_birth
-              )
-            `)
-            .eq('client_id', userId)
-            .single();
-          
-          if (!error && data) {
-            profile = data;
-            await this.cache.set(prefix, userId, profile);
-          }
-        } else {
-          const { data, error } = await supabase
-            .from('sys_user')
-            .select(`
-              sys_user_id,
-              sys_user_email,
-              role_id,
-              sys_user_is_active,
-              profile:prof_id (
-                prof_firstname,
-                prof_lastname,
-                prof_address,
-                prof_date_of_birth
-              ),
-              role:role_id (
-                role_name,
-                role_permissions
-              )
-            `)
-            .eq('sys_user_id', userId)
-            .single();
-          
-          if (!error && data) {
-            profile = data;
-            await this.cache.set(prefix, userId, profile);
-          }
-        }
-      } catch (error) {
-        console.error(`❌ Failed to fetch ${userType} profile:`, error.message);
-      }
-    }
-    
-    return profile;
+    return await this.cache.get(prefix, userId);
+  }
+
+  async setUserProfile(userId, profileData, userType = 'agent') {
+    const prefix = userType === 'client' ? 'CLIENT_PROFILE' : 'USER_PROFILE';
+    return await this.cache.set(prefix, userId, profileData);
   }
 
   async invalidateUserProfile(userId, userType = 'agent') {
@@ -83,46 +30,36 @@ class CacheService {
   }
 
   /**
-   * DEPARTMENT CACHING (Write-Through)
+   * DEPARTMENT CACHING (Write-Through with 4-hour TTL)
    */
   
   async getDepartments() {
+    // Cache-first approach: return cache data if found, null if not found
     let departments = await this.cache.get('DEPARTMENT', 'all');
     
-    if (!departments) {
-      // Cache miss - fetch from database
-      try {
-        const { data, error } = await supabase
-          .from('department')
-          .select('*')
-          .eq('dept_is_active', true)
-          .order('dept_name');
-        
-        if (!error && data) {
-          departments = data;
-          await this.cache.set('DEPARTMENT', 'all', departments);
-        }
-      } catch (error) {
-        console.error('❌ Failed to fetch departments:', error.message);
-        return [];
-      }
+    if (departments !== null && departments !== undefined) {
+      return departments;
     }
     
-    return departments || [];
+    console.log('⚠️ Cache MISS: No departments found in cache');
+    return null; // Let the service handle database fetching
   }
 
   async updateDepartments(departments) {
-    // Write-through: Update database first, then cache
-    const dbUpdateFn = async (data) => {
-      // This would be called by the department service
-      // Just update cache here since DB update is handled by service
-    };
-    
-    return await this.cache.set('DEPARTMENT', 'all', departments);
+    // Write-through: Cache the departments with 4-hour TTL
+    const result = await this.cache.set('DEPARTMENT', 'all', departments);
+    if (result) {
+      console.log(`✅ Write-through: Cached ${departments.length} departments with 4-hour TTL`);
+    }
+    return result;
   }
 
   async invalidateDepartments() {
-    return await this.cache.delete('DEPARTMENT', 'all');
+    const result = await this.cache.delete('DEPARTMENT', 'all');
+    if (result) {
+      console.log('🧹 Invalidated departments cache');
+    }
+    return result;
   }
 
   /**
@@ -130,26 +67,15 @@ class CacheService {
    */
   
   async getRoles() {
-    let roles = await this.cache.get('ROLE', 'all');
-    
-    if (!roles) {
-      try {
-        const { data, error } = await supabase
-          .from('role')
-          .select('*')
-          .order('role_name');
-        
-        if (!error && data) {
-          roles = data;
-          await this.cache.set('ROLE', 'all', roles);
-        }
-      } catch (error) {
-        console.error('❌ Failed to fetch roles:', error.message);
-        return [];
-      }
+    return await this.cache.get('ROLE', 'all');
+  }
+
+  async updateRoles(roles) {
+    const result = await this.cache.set('ROLE', 'all', roles);
+    if (result) {
+      console.log(`✅ Write-through: Cached ${roles.length} roles`);
     }
-    
-    return roles || [];
+    return result;
   }
 
   async invalidateRoles() {
@@ -162,49 +88,93 @@ class CacheService {
   
   async getCannedMessages(roleId, userId = null) {
     const cacheKey = userId ? `${roleId}_${userId}` : roleId;
-    let messages = await this.cache.get('CANNED_MESSAGES', cacheKey);
-    
-    if (!messages) {
-      try {
-        let query = supabase
-          .from('canned_message')
-          .select('canned_id, canned_message, dept_id')
-          .eq('role_id', roleId)
-          .eq('canned_is_active', true);
+    return await this.cache.get('CANNED_MESSAGES', cacheKey);
+  }
 
-        if (userId) {
-          // Get user's departments and filter
-          const { data: userDepts } = await supabase
-            .from('sys_user_department')
-            .select('dept_id')
-            .eq('sys_user_id', userId);
-
-          if (userDepts && userDepts.length > 0) {
-            const deptIds = userDepts.map(d => d.dept_id);
-            query = query.or(`dept_id.in.(${deptIds.join(',')}),dept_id.is.null`);
-          } else {
-            query = query.is('dept_id', null);
-          }
-        }
-
-        const { data, error } = await query;
-        
-        if (!error && data) {
-          messages = data;
-          await this.cache.set('CANNED_MESSAGES', cacheKey, messages);
-        }
-      } catch (error) {
-        console.error('❌ Failed to fetch canned messages:', error.message);
-        return [];
-      }
+  async setCannedMessages(roleId, messages, userId = null) {
+    const cacheKey = userId ? `${roleId}_${userId}` : roleId;
+    const result = await this.cache.set('CANNED_MESSAGES', cacheKey, messages);
+    if (result) {
+      console.log(`✅ Cached ${messages.length} canned messages for role ${roleId}${userId ? ` and user ${userId}` : ''}`);
     }
-    
-    return messages || [];
+    return result;
   }
 
   async invalidateCannedMessages(roleId, userId = null) {
     const cacheKey = userId ? `${roleId}_${userId}` : roleId;
     return await this.cache.delete('CANNED_MESSAGES', cacheKey);
+  }
+
+  /**
+   * AUTO-REPLY CACHING (Write-Through with 2-hour TTL)
+   */
+  
+  async getAutoReplies() {
+    return await this.cache.get('AUTO_REPLY', 'all');
+  }
+
+  async updateAutoReplies(autoReplies) {
+    const result = await this.cache.set('AUTO_REPLY', 'all', autoReplies);
+    if (result) {
+      console.log(`✅ Write-through: Cached ${autoReplies.length} auto-replies with 2-hour TTL`);
+    }
+    return result;
+  }
+
+  async invalidateAutoReplies() {
+    const result = await this.cache.delete('AUTO_REPLY', 'all');
+    if (result) {
+      console.log('🧹 Invalidated auto-replies cache');
+    }
+    return result;
+  }
+
+  /**
+   * AGENT CACHING (Write-Through with 2-hour TTL)
+   */
+  
+  async getAgents() {
+    return await this.cache.get('AGENT', 'all');
+  }
+
+  async updateAgents(agents) {
+    const result = await this.cache.set('AGENT', 'all', agents);
+    if (result) {
+      console.log(`✅ Write-through: Cached ${agents.length} agents with 2-hour TTL`);
+    }
+    return result;
+  }
+
+  async invalidateAgents() {
+    const result = await this.cache.delete('AGENT', 'all');
+    if (result) {
+      console.log('🧹 Invalidated agents cache');
+    }
+    return result;
+  }
+
+  /**
+   * CHANGE-ROLE CACHING (Write-Through with 1-hour TTL)
+   */
+  
+  async getUsersWithRoles() {
+    return await this.cache.get('CHANGE_ROLE', 'users_with_roles');
+  }
+
+  async updateUsersWithRoles(usersWithRoles) {
+    const result = await this.cache.set('CHANGE_ROLE', 'users_with_roles', usersWithRoles);
+    if (result) {
+      console.log(`✅ Write-through: Cached ${usersWithRoles.length} users with roles with 1-hour TTL`);
+    }
+    return result;
+  }
+
+  async invalidateUsersWithRoles() {
+    const result = await this.cache.delete('CHANGE_ROLE', 'users_with_roles');
+    if (result) {
+      console.log('🧹 Invalidated users with roles cache');
+    }
+    return result;
   }
 
   /**

@@ -1,9 +1,8 @@
 const supabase = require('../helpers/supabaseClient');
-const cacheService = require('../services/cache.service');
 
 /**
  * User Status Manager - Handles cleanup and maintenance of online users
- * Now uses centralized cache manager
+ * Redis caching removed - using in-memory storage only
  */
 class UserStatusManager {
   constructor(io, userStatusHandlers) {
@@ -66,8 +65,8 @@ class UserStatusManager {
    */
   startRateLimitCleanup() {
     this.rateLimitCleanupInterval = setInterval(async () => {
-      await cacheService.cleanup();
-      console.log('🧹 Cache cleanup completed');
+      await this.userStatusHandlers.cleanupRateLimits();
+      console.log('🧹 Rate limits and stale users cleanup completed');
     }, 300000); // Run every 5 minutes
   }
 
@@ -77,7 +76,7 @@ class UserStatusManager {
   async cleanupStaleUsers() {
     const now = new Date();
     const staleThreshold = 45000; // 45 seconds
-    const onlineUsers = await cacheService.getOnlineUsers();
+    const onlineUsers = await this.userStatusHandlers.getOnlineUsers();
     
     const staleUsers = [];
     
@@ -92,8 +91,8 @@ class UserStatusManager {
 
     // Process stale users
     for (const { userId, userData, timeSinceLastSeen } of staleUsers) {
-      // Set user offline in cache
-      await cacheService.setUserOffline(userId);
+      // Remove user from in-memory storage
+      this.userStatusHandlers.onlineUsers.delete(userId);
       
       // Broadcast offline status
       this.io.emit('userStatusChanged', {
@@ -133,7 +132,7 @@ class UserStatusManager {
 
     // Only log if there are active rooms to avoid spam
     if (activeRooms.length > 5) {
-      const onlineUsers = await cacheService.getOnlineUsers();
+      const onlineUsers = await this.userStatusHandlers.getOnlineUsers();
       const onlineUsersCount = Object.keys(onlineUsers).length;
       console.log(`📊 Active Rooms: ${activeRooms.length}, Total Users: ${this.io.sockets.sockets.size}, Online Users: ${onlineUsersCount}`);
     }
@@ -143,7 +142,7 @@ class UserStatusManager {
    * Get comprehensive status statistics
    */
   async getStatusStatistics() {
-    const onlineUsers = await cacheService.getOnlineUsers();
+    const onlineUsers = await this.userStatusHandlers.getOnlineUsers();
     const rooms = this.io.sockets.adapter.rooms;
     
     const stats = {
@@ -182,13 +181,13 @@ class UserStatusManager {
    * Force cleanup of a specific user
    */
   async forceUserOffline(userId, reason = 'Manual cleanup') {
-    const onlineUsers = await cacheService.getOnlineUsers();
+    const onlineUsers = await this.userStatusHandlers.getOnlineUsers();
     
     if (onlineUsers[userId]) {
       const lastSeen = new Date();
       
-      // Set user offline in cache
-      await cacheService.setUserOffline(userId);
+      // Remove user from in-memory storage
+      this.userStatusHandlers.onlineUsers.delete(userId);
       
       // Broadcast offline status
       this.io.emit('userStatusChanged', {
