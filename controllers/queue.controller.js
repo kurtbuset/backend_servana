@@ -1,6 +1,8 @@
 const express = require("express");
 const queueService = require("../services/queue.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
+const { checkPermission } = require("../middleware/checkPermission");
+const { PERMISSIONS } = require("../constants/permissions");
 
 class QueueController {
   getRouter() {
@@ -8,15 +10,23 @@ class QueueController {
 
     router.use(getCurrentUser);
 
-    // Get unassigned chat groups (queue)
-    router.get("/chatgroups", (req, res) => this.getChatGroups(req, res));
+    // Get unassigned chat groups (queue) - requires message viewing permission
+    router.get("/chatgroups", 
+      checkPermission(PERMISSIONS.VIEW_MESSAGE),
+      (req, res) => this.getChatGroups(req, res)
+    );
 
-    // Accept a chat from the queue
-    router.post("/:chatGroupId/accept", (req, res) => this.acceptChat(req, res));
+    // Accept a chat from the queue - requires message viewing permission
+    router.post("/:chatGroupId/accept", 
+      checkPermission(PERMISSIONS.VIEW_MESSAGE),
+      (req, res) => this.acceptChat(req, res)
+    );
 
-    // Get chat messages and assign to user
-    router.get("/:clientId", (req, res) => this.getChatMessages(req, res));
-
+    // Get chat messages and assign to user - requires message viewing permission
+    router.get("/:clientId", 
+      checkPermission(PERMISSIONS.VIEW_MESSAGE),
+      (req, res) => this.getChatMessages(req, res)
+    );
 
     return router;
   }

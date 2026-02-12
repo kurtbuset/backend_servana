@@ -1,7 +1,8 @@
 const express = require("express");
 const departmentService = require("../services/department.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
-const { checkPermission } = require("../middleware/checkPermission");
+const { checkPermission, checkAnyPermission } = require("../middleware/checkPermission");
+const { PERMISSIONS } = require("../constants/permissions")
 
 class DepartmentController {
   getRouter() {
@@ -11,32 +12,31 @@ class DepartmentController {
     router.use(getCurrentUser);
 
     // Get all departments - requires department management permission
-    router.get("/", 
-      checkPermission('priv_can_manage_dept'),
+    router.get("/", checkAnyPermission([PERMISSIONS.MANAGE_ROLE, PERMISSIONS.VIEW_MESSAGE]),
       (req, res) => this.getAllDepartments(req, res)
     );
 
     // Add a new department - requires department management permission
     router.post("/", 
-      checkPermission('priv_can_manage_dept'),
+      checkPermission(PERMISSIONS.MANAGE_DEPT),
       (req, res) => this.createDepartment(req, res)
     );
 
     // Update an existing department - requires department management permission
     router.put("/:id", 
-      checkPermission('priv_can_manage_dept'),
+      checkPermission(PERMISSIONS.MANAGE_DEPT),
       (req, res) => this.updateDepartment(req, res)
     );
 
     // Toggle dept_is_active status - requires department management permission
     router.put("/:id/toggle", 
-      checkPermission('priv_can_manage_dept'),
+      checkPermission(PERMISSIONS.MANAGE_DEPT),
       (req, res) => this.toggleDepartmentStatus(req, res)
     );
 
     // Get members of a department - requires department management permission
     router.get("/:id/members", 
-      checkPermission('priv_can_manage_dept'),
+      checkPermission(PERMISSIONS.MANAGE_DEPT),
       (req, res) => this.getDepartmentMembers(req, res)
     );
 

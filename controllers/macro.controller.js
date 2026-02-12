@@ -2,6 +2,8 @@ const express = require("express");
 const macroService = require("../services/macro.service");
 const roleService = require("../services/role.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
+const { checkPermission } = require("../middleware/checkPermission");
+const { PERMISSIONS } = require("../constants/permissions")
 
 class MacroController {
   getRouter() {
@@ -9,14 +11,23 @@ class MacroController {
 
     router.use(getCurrentUser);
 
-    // Get all macros for a specific role (dynamic)
-    router.get("/:roleType", (req, res) => this.getMacrosByRoleType(req, res));
+    // Get all macros for a specific role (dynamic) - requires canned message permission
+    router.get("/:roleType", 
+      checkPermission(PERMISSIONS.USE_CANNED_MESS),
+      (req, res) => this.getMacrosByRoleType(req, res)
+    );
 
-    // Create new macro for a specific role (dynamic)
-    router.post("/:roleType", (req, res) => this.createMacro(req, res));
+    // Create new macro for a specific role (dynamic) - requires canned message permission
+    router.post("/:roleType", 
+      checkPermission(PERMISSIONS.USE_CANNED_MESS),
+      (req, res) => this.createMacro(req, res)
+    );
 
-    // Update existing macro
-    router.put("/:roleType/:id", (req, res) => this.updateMacro(req, res));
+    // Update existing macro - requires canned message permission
+    router.put("/:roleType/:id", 
+      checkPermission(PERMISSIONS.USE_CANNED_MESS),
+      (req, res) => this.updateMacro(req, res)
+    );
 
     return router;
   }

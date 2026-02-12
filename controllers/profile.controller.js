@@ -2,6 +2,8 @@ const express = require("express");
 const multer = require("multer");
 const profileService = require("../services/profile.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
+const { checkPermission } = require("../middleware/checkPermission");
+const { PERMISSIONS } = require("../constants/permissions")
 
 class ProfileController {
   getRouter() {
@@ -15,10 +17,10 @@ class ProfileController {
     router.get("/", (req, res) => this.getCurrentUserProfile(req, res));
 
     // Update current user profile
-    router.put("/", (req, res) => this.updateCurrentUserProfile(req, res));
+    router.put("/", checkPermission(PERMISSIONS.MANAGE_PROFILE), (req, res) => this.updateCurrentUserProfile(req, res));
 
     // Upload profile image
-    router.post("/image", upload.single("image"), (req, res) => this.uploadProfileImage(req, res));
+    router.post("/image", checkPermission(PERMISSIONS.MANAGE_PROFILE), upload.single("image"), (req, res) => this.uploadProfileImage(req, res));
 
     return router;
   }
@@ -101,16 +103,6 @@ class ProfileController {
         profile: profRow,
         image,
       };
-
-      // console.log("🔍 Profile Controller - Full response data:", {
-      //   user_id: responseData.sys_user_id,
-      //   role_id: responseData.role_id,
-      //   role_name: responseData.role_name,
-      //   has_privileges: !!responseData.privilege,
-      //   departments_count: responseData.departments?.length || 0,
-      //   departments: responseData.departments,
-      //   has_profile: !!profRow?.prof_id
-      // });
 
       res.json(responseData);
     } catch (err) {

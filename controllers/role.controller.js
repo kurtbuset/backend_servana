@@ -2,6 +2,7 @@ const express = require("express");
 const roleService = require("../services/role.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
 const { checkPermission } = require("../middleware/checkPermission");
+const { PERMISSIONS } = require("../constants/permissions")
 
 class RoleController {
   getRouter() {
@@ -12,31 +13,31 @@ class RoleController {
 
     // Get all roles with permissions - requires role management permission
     router.get("/", 
-      checkPermission('priv_can_manage_role'),
+      checkPermission(PERMISSIONS.MANAGE_ROLE),
       (req, res) => this.getAllRoles(req, res)
     );
 
     // Create new role - requires role management permission
     router.post("/", 
-      checkPermission('priv_can_manage_role'),
+      checkPermission(PERMISSIONS.MANAGE_ROLE),
       (req, res) => this.createRole(req, res)
     );
 
     // Update existing role - requires role management permission
     router.put("/:id", 
-      checkPermission('priv_can_manage_role'),
+      checkPermission(PERMISSIONS.MANAGE_ROLE),
       (req, res) => this.updateRole(req, res)
     );
 
     // Get members for a specific role - requires role management permission
     router.get("/:roleId/members", 
-      checkPermission('priv_can_manage_role'),
+      checkPermission(PERMISSIONS.MANAGE_ROLE),
       (req, res) => this.getRoleMembers(req, res)
     );
 
     // Update member permissions - requires role management permission
     router.put("/:roleId/members/:userId/permissions", 
-      checkPermission('priv_can_manage_role'),
+      checkPermission(PERMISSIONS.MANAGE_ROLE),
       (req, res) => this.updateMemberPermissions(req, res)
     );
 

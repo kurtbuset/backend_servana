@@ -2,6 +2,7 @@ const express = require("express");
 const adminService = require("../services/admin.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
 const { checkPermission } = require("../middleware/checkPermission");
+const { PERMISSIONS } = require("../constants/permissions");
 
 class AdminController {
   getRouter() {
@@ -12,25 +13,25 @@ class AdminController {
 
     // Get all admins - requires account creation permission (admin-level)
     router.get("/",
-      checkPermission('priv_can_create_account'),
+      checkPermission(PERMISSIONS.CREATE_ACCOUNT),
       (req, res) => this.getAllAdmins(req, res)
     );
 
     // Add a new admin - requires account creation permission
     router.post("/",
-      checkPermission('priv_can_create_account'),
+      checkPermission(PERMISSIONS.CREATE_ACCOUNT),
       (req, res) => this.createAdmin(req, res)
     );
 
     // Update an existing admin - requires account creation permission
     router.put("/:id",
-      checkPermission('priv_can_create_account'),
+      checkPermission(PERMISSIONS.CREATE_ACCOUNT),
       (req, res) => this.updateAdmin(req, res)
     );
 
     // Toggle active status - requires account creation permission
     router.put("/:id/toggle",
-      checkPermission('priv_can_create_account'),
+      checkPermission(PERMISSIONS.CREATE_ACCOUNT),
       (req, res) => this.toggleAdminStatus(req, res)
     );
 

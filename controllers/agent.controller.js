@@ -2,6 +2,7 @@ const express = require("express");
 const agentService = require("../services/agent.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
 const { checkPermission, checkAnyPermission } = require("../middleware/checkPermission");
+const { PERMISSIONS } = require("../constants/permissions");
 
 class AgentController {
   getRouter() {
@@ -12,25 +13,25 @@ class AgentController {
 
     // Fetch all agents with their departments - requires role management permission
     router.get("/agents", 
-      checkAnyPermission(['priv_can_manage_role', 'priv_can_create_account']),
+      checkAnyPermission([PERMISSIONS.MANAGE_ROLE, PERMISSIONS.CREATE_ACCOUNT]),
       (req, res) => this.getAllAgents(req, res)
     );
 
     // Fetch all departments - requires department management permission
     router.get("/departments", 
-      checkPermission('priv_can_manage_dept'),
+      checkPermission(PERMISSIONS.MANAGE_DEPT),
       (req, res) => this.getActiveDepartments(req, res)
     );
 
     // Update agent - requires role management permission
     router.put("/agents/:id", 
-      checkPermission('priv_can_manage_role'),
+      checkPermission(PERMISSIONS.MANAGE_ROLE),
       (req, res) => this.updateAgent(req, res)
     );
 
     // Create agent - requires account creation permission
     router.post("/agents", 
-      checkPermission('priv_can_create_account'),
+      checkPermission(PERMISSIONS.CREATE_ACCOUNT),
       (req, res) => this.createAgent(req, res)
     );
 

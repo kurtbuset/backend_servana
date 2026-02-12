@@ -1,6 +1,6 @@
 const supabase = require('../../helpers/supabaseClient');
 const AuthUtils = require('./authUtils');
-const jwtUtils = require('../../src/utils/jwt');
+const jwtUtils = require('../../utils/jwt');
 
 /**
  * Mobile Socket Authentication
