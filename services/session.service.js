@@ -1,9 +1,10 @@
 const crypto = require('crypto');
 
+/**
+ * Session Service - Now uses centralized cache manager
+ */
 class SessionService {
   constructor() {
-    this.SESSION_PREFIX = 'session:';
-    this.USER_SESSIONS_PREFIX = 'user_sessions:';
     this.SESSION_EXPIRY = 24 * 60 * 60; // 24 hours in seconds
   }
 
@@ -17,32 +18,24 @@ class SessionService {
   /**
    * Create a new session for a user
    */
-  async createSession(redisClient, userId, userData = {}) {
+  async createSession(cache, userId, userData = {}) {
     try {
       const sessionId = this.generateSessionId();
-      const sessionKey = `${this.SESSION_PREFIX}${sessionId}`;
-      const userSessionsKey = `${this.USER_SESSIONS_PREFIX}${userId}`;
-
-      // Session data to store
+      
       const sessionData = {
-        userId: userId,
+        userId,
+        ...userData,
         createdAt: new Date().toISOString(),
-        lastAccessed: new Date().toISOString(),
-        ...userData
+        lastAccessed: new Date().toISOString()
       };
 
-      // Store session data with expiry
-      await redisClient.setEx(sessionKey, this.SESSION_EXPIRY, JSON.stringify(sessionData));
+      await cache.createSession(sessionId, userId, sessionData);
       
-      // Add session to user's session list
-      await redisClient.sAdd(userSessionsKey, sessionId);
-      await redisClient.expire(userSessionsKey, this.SESSION_EXPIRY);
-
-      console.log(`✅ Redis: Created session ${sessionId} for user ${userId}`);
+      console.log(`✅ Session: Created session ${sessionId} for user ${userId}`);
       
       return sessionId;
     } catch (error) {
-      console.error('❌ Redis: Failed to create session:', error.message);
+      console.error('❌ Session: Failed to create session:', error.message);
       throw error;
     }
   }
@@ -50,27 +43,20 @@ class SessionService {
   /**
    * Get session data by session ID
    */
-  async getSession(redisClient, sessionId) {
+  async getSession(cache, sessionId) {
     try {
-      const sessionKey = `${this.SESSION_PREFIX}${sessionId}`;
-      const sessionData = await redisClient.get(sessionKey);
+      const sessionData = await cache.getSession(sessionId);
 
       if (!sessionData) {
-        console.log(`⚠️ Redis: Session ${sessionId} not found or expired`);
+        console.log(`⚠️ Session: Session ${sessionId} not found or expired`);
         return null;
       }
 
-      const parsedData = JSON.parse(sessionData);
+      console.log(`✅ Session: Retrieved session ${sessionId} for user ${sessionData.userId}`);
       
-      // Update last accessed time
-      parsedData.lastAccessed = new Date().toISOString();
-      await redisClient.setEx(sessionKey, this.SESSION_EXPIRY, JSON.stringify(parsedData));
-
-      console.log(`✅ Redis: Retrieved session ${sessionId} for user ${parsedData.userId}`);
-      
-      return parsedData;
+      return sessionData;
     } catch (error) {
-      console.error('❌ Redis: Failed to get session:', error.message);
+      console.error('❌ Session: Failed to get session:', error.message);
       return null;
     }
   }
@@ -78,28 +64,15 @@ class SessionService {
   /**
    * Delete a specific session
    */
-  async deleteSession(redisClient, sessionId) {
+  async deleteSession(cache, sessionId) {
     try {
-      const sessionKey = `${this.SESSION_PREFIX}${sessionId}`;
+      const result = await cache.deleteSession(sessionId);
       
-      // Get session data to find user ID
-      const sessionData = await redisClient.get(sessionKey);
-      if (sessionData) {
-        const { userId } = JSON.parse(sessionData);
-        const userSessionsKey = `${this.USER_SESSIONS_PREFIX}${userId}`;
-        
-        // Remove session from user's session list
-        await redisClient.sRem(userSessionsKey, sessionId);
-      }
-
-      // Delete the session
-      const result = await redisClient.del(sessionKey);
+      console.log(`✅ Session: Deleted session ${sessionId}`);  
       
-      console.log(`✅ Redis: Deleted session ${sessionId}`);
-      
-      return result > 0;
+      return result;
     } catch (error) {
-      console.error('❌ Redis: Failed to delete session:', error.message);
+      console.error('❌ Session: Failed to delete session:', error.message);
       return false;
     }
   }
@@ -107,30 +80,15 @@ class SessionService {
   /**
    * Delete all sessions for a user
    */
-  async deleteUserSessions(redisClient, userId) {
+  async deleteUserSessions(cache, userId) {
     try {
-      const userSessionsKey = `${this.USER_SESSIONS_PREFIX}${userId}`;
-      
-      // Get all session IDs for the user
-      const sessionIds = await redisClient.sMembers(userSessionsKey);
-      
-      if (sessionIds.length === 0) {
-        console.log(`⚠️ Redis: No sessions found for user ${userId}`);
-        return 0;
-      }
+      const deletedCount = await cache.deleteUserSessions(userId);
 
-      // Delete all session data
-      const sessionKeys = sessionIds.map(id => `${this.SESSION_PREFIX}${id}`);
-      const deletedCount = await redisClient.del(sessionKeys);
-      
-      // Delete user sessions list
-      await redisClient.del(userSessionsKey);
-
-      console.log(`✅ Redis: Deleted ${deletedCount} sessions for user ${userId}`);
+      console.log(`✅ Session: Deleted ${deletedCount} sessions for user ${userId}`);
       
       return deletedCount;
     } catch (error) {
-      console.error('❌ Redis: Failed to delete user sessions:', error.message);
+      console.error('❌ Session: Failed to delete user sessions:', error.message);
       return 0;
     }
   }
@@ -138,10 +96,9 @@ class SessionService {
   /**
    * Get all active sessions for a user
    */
-  async getUserSessions(redisClient, userId) {
+  async getUserSessions(cache, userId) {
     try {
-      const userSessionsKey = `${this.USER_SESSIONS_PREFIX}${userId}`;
-      const sessionIds = await redisClient.sMembers(userSessionsKey);
+      const sessionIds = await cache.getSetMembers('USER_SESSIONS', userId);
 
       if (sessionIds.length === 0) {
         return [];
@@ -149,17 +106,17 @@ class SessionService {
 
       const sessions = [];
       for (const sessionId of sessionIds) {
-        const sessionData = await this.getSession(redisClient, sessionId);
+        const sessionData = await cache.getSession(sessionId);
         if (sessionData) {
           sessions.push({ sessionId, ...sessionData });
         }
       }
 
-      console.log(`✅ Redis: Retrieved ${sessions.length} sessions for user ${userId}`);
+      console.log(`✅ Session: Retrieved ${sessions.length} sessions for user ${userId}`);
       
       return sessions;
     } catch (error) {
-      console.error('❌ Redis: Failed to get user sessions:', error.message);
+      console.error('❌ Session: Failed to get user sessions:', error.message);
       return [];
     }
   }

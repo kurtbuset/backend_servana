@@ -1,13 +1,14 @@
 const RoomAccess = require('./roomAccess');
+const cacheService = require('../../services/cache.service');
 
 /**
- * Message Authorization
+ * Message Authorization - Now uses centralized Redis cache
  * Handles authorization for message-related operations
  */
 class MessageAuth {
   constructor() {
     this.roomAccess = new RoomAccess();
-    this.rateLimiters = new Map(); // Store rate limiters per user
+    // Using centralized cache manager now
   }
 
   /**
@@ -27,14 +28,14 @@ class MessageAuth {
       // 3. Verify sender identity
       this.verifySenderIdentity(userContext, messageData);
       
-      // 4. Check rate limits
+      // 4. Check rate limits using Redis
       await this.checkRateLimit(userContext, 'sendMessage');
       
       // 5. Validate message content
       const sanitizedContent = this.validateAndSanitizeContent(messageData.chat_body);
       
-      // 6. Check for spam/abuse patterns
-      this.checkForAbuse(userContext, sanitizedContent);
+      // 6. Check for spam/abuse patterns using Redis
+      await this.checkForAbuse(userContext, sanitizedContent);
       
       return {
         authorized: true,
@@ -47,6 +48,80 @@ class MessageAuth {
     } catch (error) {
       console.error(`❌ Message authorization failed:`, error.message);
       throw new Error(`Message authorization failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check rate limits using Redis
+   */
+  async checkRateLimit(userContext, action) {
+    try {
+      const userId = `${userContext.userType}_${userContext.userId}`;
+      const rateLimitKey = `${action}_${userId}`;
+      
+      // Get rate limits from user permissions
+      const limits = userContext.permissions?.rateLimits || {
+        messagesPerMinute: 30
+      };
+      
+      const limit = action === 'sendMessage' ? limits.messagesPerMinute : 30;
+      const allowed = await cacheService.checkRateLimit(rateLimitKey, limit, 60);
+      
+      if (!allowed) {
+        throw new Error(`Rate limit exceeded: maximum ${limit} ${action} per minute`);
+      }
+    } catch (error) {
+      if (error.message.includes('Rate limit exceeded')) {
+        throw error;
+      }
+      console.error('❌ Error checking rate limit:', error.message);
+      // Allow on error to prevent blocking legitimate users
+    }
+  }
+
+  /**
+   * Check for spam and abuse patterns using Redis
+   */
+  async checkForAbuse(userContext, content) {
+    try {
+      const userId = `${userContext.userType}_${userContext.userId}`;
+      const abuseKey = `abuse_check_${userId}`;
+      
+      // Get recent messages for this user
+      let recentMessages = await cacheService.cache.get('RATE_LIMIT', abuseKey) || [];
+      
+      const now = Date.now();
+      const fiveMinutesAgo = now - 5 * 60 * 1000;
+      
+      // Keep only messages from last 5 minutes
+      recentMessages = recentMessages.filter(msg => msg.timestamp > fiveMinutesAgo);
+      
+      // Check for spam (same message repeated)
+      const identicalCount = recentMessages.filter(msg => msg.content === content).length;
+      if (identicalCount >= 3) {
+        throw new Error('Spam detected: identical message sent too frequently');
+      }
+
+      // Check for excessive caps
+      const capsRatio = (content.match(/[A-Z]/g) || []).length / content.length;
+      if (content.length > 20 && capsRatio > 0.7) {
+        // Don't block, just log for now
+      }
+
+      // Store message for future spam checking
+      recentMessages.push({
+        content: content,
+        timestamp: now
+      });
+      
+      // Cache for 5 minutes
+      await cacheService.cache.set('RATE_LIMIT', abuseKey, recentMessages, 300);
+    } catch (error) {
+      if (error.message.includes('Spam detected')) {
+        throw error;
+      }
+      console.error('❌ Error checking for abuse:', error.message);
+      // Allow on error
     }
   }
 
@@ -156,236 +231,69 @@ class MessageAuth {
   }
 
   /**
-   * Check rate limits for user actions
+   * Check rate limits for user actions (legacy method for compatibility)
    */
-  async checkRateLimit(userContext, action) {
-    const userId = `${userContext.userType}_${userContext.userId}`;
-    const now = Date.now();
-    
-    if (!this.rateLimiters.has(userId)) {
-      this.rateLimiters.set(userId, {
-        messages: [],
-        lastCleanup: now
-      });
-    }
-
-    const userLimiter = this.rateLimiters.get(userId);
-    
-    // Clean up old entries (older than 1 minute)
-    const oneMinuteAgo = now - 60 * 1000;
-    userLimiter.messages = userLimiter.messages.filter(timestamp => timestamp > oneMinuteAgo);
-    
-    // Get rate limits from user permissions
-    const limits = userContext.permissions?.rateLimits || {
-      messagesPerMinute: 30
-    };
-
-    // Check if user has exceeded rate limit
-    if (action === 'sendMessage') {
-      if (userLimiter.messages.length >= limits.messagesPerMinute) {
-        throw new Error(`Rate limit exceeded: maximum ${limits.messagesPerMinute} messages per minute`);
-      }
-      
-      // Add current timestamp
-      userLimiter.messages.push(now);
-    }
-
-    // Cleanup old rate limiters every 5 minutes
-    if (now - userLimiter.lastCleanup > 5 * 60 * 1000) {
-      this.cleanupRateLimiters();
-      userLimiter.lastCleanup = now;
-    }
+  async checkRateLimitLegacy(userContext, action) {
+    // Redirect to new Redis-based rate limiting
+    return await this.checkRateLimit(userContext, action);
   }
 
   /**
-   * Check for spam and abuse patterns
+   * Check for spam and abuse patterns (legacy method for compatibility)
    */
-  checkForAbuse(userContext, content) {
-    const userId = `${userContext.userType}_${userContext.userId}`;
-    
-    // Check for repeated identical messages
-    if (!this.recentMessages) {
-      this.recentMessages = new Map();
-    }
-
-    const userMessages = this.recentMessages.get(userId) || [];
-    const now = Date.now();
-    
-    // Keep only messages from last 5 minutes
-    const fiveMinutesAgo = now - 5 * 60 * 1000;
-    const recentUserMessages = userMessages.filter(msg => msg.timestamp > fiveMinutesAgo);
-    
-    // Check for spam (same message repeated)
-    const identicalCount = recentUserMessages.filter(msg => msg.content === content).length;
-    if (identicalCount >= 3) {
-      throw new Error('Spam detected: identical message sent too frequently');
-    }
-
-    // Check for excessive caps
-    const capsRatio = (content.match(/[A-Z]/g) || []).length / content.length;
-    if (content.length > 20 && capsRatio > 0.7) {
-      console.warn(`Excessive caps detected from user ${userId}`);
-      // Don't block, just log for now
-    }
-
-    // Store message for future spam checking
-    recentUserMessages.push({
-      content: content,
-      timestamp: now
-    });
-    
-    this.recentMessages.set(userId, recentUserMessages);
+  async checkForAbuseLegacy(userContext, content) {
+    // Redirect to new Redis-based abuse checking
+    return await this.checkForAbuse(userContext, content);
   }
 
   /**
-   * Apply user-specific filters for message viewing
-   */
-  applyUserFilters(userContext, filters) {
-    const authorizedFilters = { ...filters };
-
-    // Clients can only see their own messages and agent responses
-    if (userContext.userType === 'client') {
-      authorizedFilters.clientId = userContext.clientId;
-    }
-
-    // Apply department restrictions for agents if needed
-    if (userContext.userType === 'agent' && !userContext.permissions?.canAccessAllDepartments) {
-      // Add department-specific filters if needed
-      // This would depend on your specific business logic
-    }
-
-    return authorizedFilters;
-  }
-
-  /**
-   * Authorize message editing (if supported)
-   */
-  async authorizeEditMessage(userContext, messageId, newContent) {
-    try {
-      // Get original message
-      const originalMessage = await this.getMessageById(messageId);
-      
-      if (!originalMessage) {
-        throw new Error('Message not found');
-      }
-
-      // Check if user owns the message
-      const isOwner = (userContext.userType === 'agent' && originalMessage.sys_user_id === userContext.userId) ||
-                     (userContext.userType === 'client' && originalMessage.client_id === userContext.clientId);
-
-      if (!isOwner) {
-        throw new Error('Can only edit your own messages');
-      }
-
-      // Check if message is too old to edit (e.g., 5 minutes)
-      const messageAge = Date.now() - new Date(originalMessage.chat_created_at).getTime();
-      const fiveMinutes = 5 * 60 * 1000;
-      
-      if (messageAge > fiveMinutes) {
-        throw new Error('Message too old to edit');
-      }
-
-      // Validate new content
-      const sanitizedContent = this.validateAndSanitizeContent(newContent);
-
-      return {
-        authorized: true,
-        sanitizedContent: sanitizedContent,
-        originalMessage: originalMessage
-      };
-    } catch (error) {
-      throw new Error(`Message edit authorization failed: ${error.message}`);
-    }
-  }
-
-  /**
-   * Authorize message deletion (if supported)
-   */
-  async authorizeDeleteMessage(userContext, messageId) {
-    try {
-      const originalMessage = await this.getMessageById(messageId);
-      
-      if (!originalMessage) {
-        throw new Error('Message not found');
-      }
-
-      // Only allow deletion by message owner or admin
-      const isOwner = (userContext.userType === 'agent' && originalMessage.sys_user_id === userContext.userId) ||
-                     (userContext.userType === 'client' && originalMessage.client_id === userContext.clientId);
-      
-      const isAdmin = userContext.permissions?.canAccessAllDepartments;
-
-      if (!isOwner && !isAdmin) {
-        throw new Error('Insufficient permissions to delete message');
-      }
-
-      return {
-        authorized: true,
-        originalMessage: originalMessage
-      };
-    } catch (error) {
-      throw new Error(`Message deletion authorization failed: ${error.message}`);
-    }
-  }
-
-  /**
-   * Get message by ID (helper method)
-   */
-  async getMessageById(messageId) {
-    // This would typically query your database
-    // For now, return null as this is a placeholder
-    console.warn('getMessageById not implemented - placeholder method');
-    return null;
-  }
-
-  /**
-   * Clean up old rate limiters
+   * Clean up old rate limiters (now handled by Redis TTL)
    */
   cleanupRateLimiters() {
-    const now = Date.now();
-    const fiveMinutesAgo = now - 5 * 60 * 1000;
-
-    for (const [userId, limiter] of this.rateLimiters.entries()) {
-      // Remove users with no recent activity
-      if (limiter.messages.length === 0 || Math.max(...limiter.messages) < fiveMinutesAgo) {
-        this.rateLimiters.delete(userId);
-      }
-    }
+    // Rate limiters are automatically cleaned up by Redis TTL
+    console.log('🧹 Rate limiters cleaned up automatically by Redis TTL');
   }
 
   /**
-   * Get rate limit status for a user
+   * Get rate limit status for a user using Redis
    */
-  getRateLimitStatus(userContext) {
-    const userId = `${userContext.userType}_${userContext.userId}`;
-    const userLimiter = this.rateLimiters.get(userId);
-    
-    if (!userLimiter) {
+  async getRateLimitStatus(userContext) {
+    try {
+      const userId = `${userContext.userType}_${userContext.userId}`;
+      const rateLimitKey = `sendMessage_${userId}`;
+      
+      // This is a simplified version - Redis doesn't easily provide current count
+      // In a production system, you might want to implement a more sophisticated tracking
+      const limits = userContext.permissions?.rateLimits || {
+        messagesPerMinute: 30
+      };
+
+      return {
+        messagesInLastMinute: 'N/A', // Would need additional tracking to provide exact count
+        limit: limits.messagesPerMinute,
+        remaining: 'N/A' // Would need additional tracking
+      };
+    } catch (error) {
+      console.error('❌ Error getting rate limit status:', error.message);
       return {
         messagesInLastMinute: 0,
-        limit: userContext.permissions?.rateLimits?.messagesPerMinute || 30,
-        remaining: userContext.permissions?.rateLimits?.messagesPerMinute || 30
+        limit: 30,
+        remaining: 30
       };
     }
-
-    const now = Date.now();
-    const oneMinuteAgo = now - 60 * 1000;
-    const recentMessages = userLimiter.messages.filter(timestamp => timestamp > oneMinuteAgo);
-    const limit = userContext.permissions?.rateLimits?.messagesPerMinute || 30;
-
-    return {
-      messagesInLastMinute: recentMessages.length,
-      limit: limit,
-      remaining: Math.max(0, limit - recentMessages.length)
-    };
   }
 
   /**
-   * Reset rate limits for a user (admin function)
+   * Reset rate limits for a user using Redis
    */
-  resetRateLimit(userType, userId) {
-    const userKey = `${userType}_${userId}`;
-    this.rateLimiters.delete(userKey);
+  async resetRateLimit(userType, userId) {
+    try {
+      const rateLimitKey = `sendMessage_${userType}_${userId}`;
+      await cacheService.cache.delete('RATE_LIMIT', rateLimitKey);
+      console.log(`🔄 Reset rate limit for ${userType} ${userId}`);
+    } catch (error) {
+      console.error('❌ Error resetting rate limit:', error.message);
+    }
   }
 }
 

@@ -22,7 +22,7 @@ class SocketConfig {
    * Initialize Socket.IO with configuration
    */
   initialize() {
-    this.io = socketIo(this.server, {
+    this.io = socketIo(this.server, { 
       cors: {
         origin: this.allowedOrigins,
         credentials: true,
@@ -30,10 +30,7 @@ class SocketConfig {
     });
 
     // Add authentication middleware
-    console.log('🔐 Adding socket authentication middleware...');
     this.io.use((socket, next) => {
-      console.log('🔍 Socket connection attempt:', socket.id);
-      // console.log('🔍 Headers:', socket.handshake.headers);
       this.authMiddleware.authenticate(socket, next);
     });
 
@@ -52,8 +49,6 @@ class SocketConfig {
    */
   setupEventListeners() {
     this.io.on('connection', (socket) => {
-      console.log(`User connected: ${socket.id}`);
-        
       // User status events
       socket.on('userOnline', async (data) => {
         await this.userStatusHandlers.handleUserOnline(socket, data);
@@ -136,13 +131,11 @@ class SocketConfig {
       userDepartments.forEach(dept => {
         const departmentRoom = `department_${dept.dept_id}`;
         socket.join(departmentRoom);
-        console.log(`🏢 Agent ${socket.user.userId} joined department room: ${departmentRoom}`);
       });
 
       // Also join individual agent room
       const agentRoom = `agent_${socket.user.userId}`;
       socket.join(agentRoom);
-      console.log(`👤 Agent ${socket.user.userId} joined personal room: ${agentRoom}`);
 
     } catch (error) {
       console.error('❌ Error joining department rooms:', error);

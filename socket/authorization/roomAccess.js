@@ -1,12 +1,12 @@
 const supabase = require('../../helpers/supabaseClient');
+const cacheService = require('../../services/cache.service');
 
 /**
- * Room Access Control
+ * Room Access Control - Now uses centralized Redis cache
  * Handles authorization for chat room access and operations
  */
 class RoomAccess {
   constructor() {
-    this.cache = new Map(); // Simple in-memory cache for room permissions
     this.cacheTimeout = 5 * 60 * 1000; // 5 minutes cache timeout
   }
 
@@ -17,17 +17,17 @@ class RoomAccess {
     try {
       // Validate room ID
       const roomId = this.validateRoomId(chatGroupId);
-      
+
       // Get room information
       const roomInfo = await this.getRoomInfo(roomId);
-      
+
       // Check user-specific access
       if (userContext.userType === 'client') {
         return await this.checkClientRoomAccess(userContext, roomInfo);
       } else if (userContext.userType === 'agent') {
         return await this.checkAgentRoomAccess(userContext, roomInfo);
       }
-      
+
       throw new Error(`Unknown user type: ${userContext.userType}`);
     } catch (error) {
       console.error(`❌ Room access check failed:`, error.message);
@@ -35,111 +35,6 @@ class RoomAccess {
     }
   }
 
-  /**
-   * Check if user can send messages in a room
-   */
-  async canSendMessage(userContext, chatGroupId) {
-    try {
-      // First check if user can join the room
-      const canJoin = await this.canJoinRoom(userContext, chatGroupId);
-      
-      if (!canJoin.allowed) {
-        return canJoin;
-      }
-
-      // Additional message-specific checks
-      const roomInfo = await this.getRoomInfo(chatGroupId);
-      
-      // Check if room is active
-      if (roomInfo.status == 'ended') {
-        return {
-          allowed: false,
-          reason: 'Chat room is inactive/ended'
-        };
-      }
-
-      // Check if user has message permissions
-      if (!userContext.permissions?.canSendMessages) {
-        return {
-          allowed: false,
-          reason: 'User does not have message sending permissions'
-        };
-      }
-
-      return {
-        allowed: true,
-        roomInfo: roomInfo
-      };
-    } catch (error) {
-      console.error(`❌ Message permission check failed:`, error.message);
-      return {
-        allowed: false,
-        reason: error.message
-      };
-    }
-  }
-
-  /**
-   * Check if user can view messages in a room
-   */
-  async canViewMessages(userContext, chatGroupId) {
-    try {
-      // Similar to canSendMessage but for viewing
-      const canJoin = await this.canJoinRoom(userContext, chatGroupId);
-      
-      if (!canJoin.allowed) {
-        return canJoin;
-      }
-
-      if (!userContext.permissions?.canViewMessages) {
-        return {
-          allowed: false,
-          reason: 'User does not have message viewing permissions'
-        };
-      }
-
-      return {
-        allowed: true,
-        roomInfo: canJoin.roomInfo
-      };
-    } catch (error) {
-      return {
-        allowed: false,
-        reason: error.message
-      };
-    }
-  }
-
-  /**
-   * Check client access to room
-   */
-  async checkClientRoomAccess(userContext, roomInfo) {
-    // Clients can only access rooms they own
-    if (roomInfo.client_id !== userContext.clientId) {
-      return {
-        allowed: false,
-        reason: 'Client can only access their own chat rooms'
-      };
-    }
-
-    // Check if client account is active
-    if (!userContext.isActive) {
-      return {
-        allowed: false,
-        reason: 'Client account is inactive'
-      };
-    }
-
-    return {
-      allowed: true,
-      roomInfo: roomInfo,
-      accessType: 'owner'
-    };
-  }
-
-  /**
-   * Check agent access to room
-   */
   async checkAgentRoomAccess(userContext, roomInfo) {
     // Check if agent account is active
     if (!userContext.isActive) {
@@ -179,20 +74,82 @@ class RoomAccess {
     };
   }
 
-  /**
-   * Check department-level access for agents
-   */
+  async canSendMessage(userContext, chatGroupId) {
+    try {
+      // First check if user can join the room
+      const canJoin = await this.canJoinRoom(userContext, chatGroupId);
+
+      if (!canJoin.allowed) {
+        return canJoin;
+      }
+
+      // Additional message-specific checks
+      const roomInfo = await this.getRoomInfo(chatGroupId);
+
+      // Check if room is active
+      if (roomInfo.status == 'ended') {
+        return {
+          allowed: false,
+          reason: 'Chat room is inactive/ended'
+        };
+      }
+
+      // Check if user has message permissions
+      if (!userContext.permissions?.canSendMessages) {
+        return {
+          allowed: false,
+          reason: 'User does not have message sending permissions'
+        };
+      }
+
+      return {
+        allowed: true,
+        roomInfo: roomInfo
+      };
+    } catch (error) {
+      console.error(`❌ Message permission check failed:`, error.message);
+      return {
+        allowed: false,
+        reason: error.message
+      };
+    }
+  }
+
+  async checkClientRoomAccess(userContext, roomInfo) {
+    // Clients can only access rooms they own
+    if (roomInfo.client_id !== userContext.clientId) {
+      return {
+        allowed: false,
+        reason: 'Client can only access their own chat rooms'
+      };
+    }
+
+    // Check if client account is active
+    if (!userContext.isActive) {
+      return {
+        allowed: false,
+        reason: 'Client account is inactive'
+      };
+    }
+
+    return {
+      allowed: true,
+      roomInfo: roomInfo,
+      accessType: 'owner'
+    };
+  }
+
   async checkDepartmentAccess(userContext, roomInfo) {
     try {
       // Get client's department from room info
       const clientDepartment = await this.getClientDepartment(roomInfo.client_id);
-      
+
       // Get agent's department permissions
       const agentDepartments = await this.getAgentDepartments(userContext.userId);
-      
+
       // Check if agent has access to client's department
       const hasAccess = agentDepartments.some(dept => dept.department_id === clientDepartment.department_id);
-      
+
       if (hasAccess) {
         return {
           allowed: true,
@@ -215,49 +172,43 @@ class RoomAccess {
   }
 
   /**
-   * Get room information from database
+   * Get room information from cache or database
    */
   async getRoomInfo(chatGroupId) {
-    const cacheKey = `room_${chatGroupId}`;
-    
-    // Check cache first
-    if (this.cache.has(cacheKey)) {
-      const cached = this.cache.get(cacheKey);
-      if (Date.now() - cached.timestamp < this.cacheTimeout) {
-        return cached.data;
-      }
-      this.cache.delete(cacheKey);
-    }
-
     try {
-      const { data: roomInfo, error } = await supabase
-        .from('chat_group')
-        .select(`
-          chat_group_id,
-          client_id,
-          sys_user_id,
-          status,
-          created_at,
-          client:client_id (
-            client_id
-          )
-        `)
-        .eq('chat_group_id', chatGroupId)
-        .single();
-
-      if (error) {
-        throw new Error(`Failed to fetch room info: ${error.message}`);
-      }
+      // Try to get from cache first
+      let roomInfo = await cacheService.getChatGroup(chatGroupId);
 
       if (!roomInfo) {
-        throw new Error('Chat room not found');
-      }
+        // Cache miss - fetch from database
+        const { data, error } = await supabase
+          .from('chat_group')
+          .select(`
+            chat_group_id,
+            client_id,
+            sys_user_id,
+            status,
+            created_at,
+            client:client_id (
+              client_id
+            )
+          `)
+          .eq('chat_group_id', chatGroupId)
+          .single();
 
-      // Cache the result
-      this.cache.set(cacheKey, {
-        data: roomInfo,
-        timestamp: Date.now()
-      });
+        if (error) {
+          throw new Error(`Failed to fetch room info: ${error.message}`);
+        }
+
+        if (!data) {
+          throw new Error('Chat room not found');
+        }
+
+        roomInfo = data;
+
+        // Cache the result for 5 minutes
+        await cacheService.cacheChatGroup(chatGroupId, roomInfo);
+      }
 
       return roomInfo;
     } catch (error) {
@@ -342,26 +293,37 @@ class RoomAccess {
   /**
    * Clear cache for a specific room (useful when room data changes)
    */
-  clearRoomCache(chatGroupId) {
-    const cacheKey = `room_${chatGroupId}`;
-    this.cache.delete(cacheKey);
+  async clearRoomCache(chatGroupId) {
+    try {
+      await cacheService.invalidateChatGroup(chatGroupId);
+      console.log(`🧹 Cleared room cache for ${chatGroupId}`);
+    } catch (error) {
+      console.error('❌ Error clearing room cache:', error.message);
+    }
   }
 
   /**
    * Clear all cached room data
    */
-  clearAllCache() {
-    this.cache.clear();
+  async clearAllCache() {
+    try {
+      // Individual room caches will expire naturally
+      console.log('🧹 Room caches will expire naturally via TTL');
+    } catch (error) {
+      console.error('❌ Error clearing all cache:', error.message);
+    }
   }
 
   /**
    * Get cache statistics (for monitoring)
    */
-  getCacheStats() {
-    return {
-      size: this.cache.size,
-      keys: Array.from(this.cache.keys())
-    };
+  async getCacheStats() {
+    try {
+      return await cacheService.getCacheStats();
+    } catch (error) {
+      console.error('❌ Error getting cache stats:', error.message);
+      return { error: 'Failed to get cache stats' };
+    }
   }
 
   /**

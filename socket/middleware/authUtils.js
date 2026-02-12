@@ -59,7 +59,6 @@ class AuthUtils {
         .single();
 
       if (error || !role) {
-        console.warn(`Role not found for roleId: ${roleId}`);
         return { canTransferChats: false, isAdmin: false };
       }
 
@@ -73,7 +72,6 @@ class AuthUtils {
         canManageUsers: roleName.includes('admin')
       };
     } catch (error) {
-      console.error('Error fetching role permissions:', error);
       return { canTransferChats: false, isAdmin: false };
     }
   }

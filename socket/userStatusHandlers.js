@@ -2,16 +2,16 @@ const supabase = require('../helpers/supabaseClient');
 
 /**
  * Socket event handlers for user online/offline status management
- * WITH SECURITY MEASURES
+ * Redis caching removed - using in-memory storage only
  */
 class UserStatusHandlers {
   constructor(io) {
     this.io = io;
-    this.onlineUsers = new Map(); // { userId: { socketId, lastSeen, userType, userName } }
-    
-    // Security: Rate limiting per user
-    this.rateLimits = new Map(); // { userId: { count, resetTime } }
     this.MAX_UPDATES_PER_MINUTE = 10; // Max 10 status updates per minute per user
+    
+    // In-memory storage for user status (replaces Redis)
+    this.onlineUsers = new Map(); // userId -> userData
+    this.rateLimiters = new Map(); // userId -> { count, resetTime }
   }
 
   /**
@@ -46,45 +46,47 @@ class UserStatusHandlers {
   }
 
   /**
-   * Security: Check rate limit for user
+   * Security: Check rate limit for user using in-memory storage
    */
-  checkRateLimit(userId) {
-    const now = Date.now();
-    const userLimit = this.rateLimits.get(userId);
-    
-    if (!userLimit) {
-      // First request from this user
-      this.rateLimits.set(userId, {
-        count: 1,
-        resetTime: now + 60000 // Reset after 1 minute
-      });
-      return { allowed: true };
-    }
-    
-    // Check if reset time has passed
-    if (now > userLimit.resetTime) {
-      // Reset the counter
-      this.rateLimits.set(userId, {
-        count: 1,
-        resetTime: now + 60000
-      });
-      return { allowed: true };
-    }
-    
-    // Check if limit exceeded
-    if (userLimit.count >= this.MAX_UPDATES_PER_MINUTE) {
+  async checkRateLimit(userId) {
+    try {
+      const now = Date.now();
+      const rateLimitData = this.rateLimiters.get(userId);
+      
+      if (!rateLimitData) {
+        // First request for this user
+        this.rateLimiters.set(userId, {
+          count: 1,
+          resetTime: now + 60000 // Reset after 1 minute
+        });
+        return { allowed: true };
+      }
+      
+      // Check if reset time has passed
+      if (now > rateLimitData.resetTime) {
+        // Reset the counter
+        this.rateLimiters.set(userId, {
+          count: 1,
+          resetTime: now + 60000
+        });
+        return { allowed: true };
+      }
+      
+      // Check if under limit
+      if (rateLimitData.count < this.MAX_UPDATES_PER_MINUTE) {
+        rateLimitData.count++;
+        return { allowed: true };
+      }
+      
       return { 
         allowed: false, 
         error: 'Rate limit exceeded. Too many status updates.',
-        retryAfter: Math.ceil((userLimit.resetTime - now) / 1000)
+        retryAfter: Math.ceil((rateLimitData.resetTime - now) / 1000)
       };
+    } catch (error) {
+      console.error('❌ Error checking rate limit:', error.message);
+      return { allowed: true }; // Allow on error
     }
-    
-    // Increment counter
-    userLimit.count++;
-    this.rateLimits.set(userId, userLimit);
-    
-    return { allowed: true };
   }
 
   /**
@@ -134,8 +136,6 @@ class UserStatusHandlers {
   async handleUserOnline(socket, data) {
     const { userId, userType, userName } = data;
     
-    console.log('🟢 userOnline event received:', { userId, userType, userName, socketId: socket.id });
-    
     // Security: Validate input data
     const validation = this.validateUserData(data);
     if (!validation.valid) {
@@ -145,9 +145,8 @@ class UserStatusHandlers {
     }
     
     // Security: Check rate limit
-    const rateLimit = this.checkRateLimit(userId);
+    const rateLimit = await this.checkRateLimit(userId);
     if (!rateLimit.allowed) {
-      console.warn(`⚠️ Rate limit exceeded for user ${userId}`);
       socket.emit('error', { 
         message: rateLimit.error,
         retryAfter: rateLimit.retryAfter
@@ -171,18 +170,17 @@ class UserStatusHandlers {
       return;
     }
     
-    // All security checks passed - proceed with status update
+    // All security checks passed - set user online in memory
     this.onlineUsers.set(userId, {
       socketId: socket.id,
       lastSeen: new Date(),
       userType,
-      userName
+      userName,
+      status: 'online'
     });
     
     socket.userId = userId;
     socket.userType = userType;
-    
-    console.log(`✅ User ${userId} (${userName}) is now online. Total online: ${this.onlineUsers.size}`);
     
     // Broadcast to all clients that this user is online
     this.io.emit('userStatusChanged', {
@@ -190,8 +188,6 @@ class UserStatusHandlers {
       status: 'online',
       lastSeen: new Date()
     });
-    
-    console.log('📡 Broadcasted userStatusChanged to all clients');
     
     // Update last_seen in database (with error handling)
     try {
@@ -201,8 +197,6 @@ class UserStatusHandlers {
         .eq('sys_user_id', userId);
       
       if (error) throw error;
-      
-      console.log('💾 Updated last_seen in database for user:', userId);
     } catch (error) {
       console.error('❌ Error updating last_seen:', error);
       // Don't expose database errors to client
@@ -229,38 +223,41 @@ class UserStatusHandlers {
     }
     
     // Security: Check rate limit
-    const rateLimit = this.checkRateLimit(userId);
+    const rateLimit = await this.checkRateLimit(userId);
     if (!rateLimit.allowed) {
-      console.warn(`⚠️ Heartbeat rate limit exceeded for user ${userId}`);
       return; // Silently ignore excessive heartbeats
     }
     
-    if (this.onlineUsers.has(userId)) {
-      // Update last seen timestamp
-      const userData = this.onlineUsers.get(userId);
-      const lastSeen = new Date();
-      userData.lastSeen = lastSeen;
-      this.onlineUsers.set(userId, userData);
-      
-      console.log(`💓 Heartbeat from user ${userId}`);
-      
-      // Broadcast status update to all clients
-      this.io.emit('userStatusChanged', {
-        userId,
-        status: 'online',
-        lastSeen
-      });
-      
-      // Update database
-      try {
-        const { error } = await supabase
-          .from('sys_user')
-          .update({ last_seen: lastSeen.toISOString() })
-          .eq('sys_user_id', userId);
+    const isOnline = await this.isUserOnline(userId);
+    if (isOnline) {
+      // Update user status in memory
+      const currentStatus = this.onlineUsers.get(userId);
+      if (currentStatus) {
+        const lastSeen = new Date();
+        this.onlineUsers.set(userId, {
+          ...currentStatus,
+          lastSeen,
+          socketId: socket.id
+        });
         
-        if (error) throw error;
-      } catch (error) {
-        console.error('❌ Error updating heartbeat:', error);
+        // Broadcast status update to all clients
+        this.io.emit('userStatusChanged', {
+          userId,
+          status: 'online',
+          lastSeen
+        });
+        
+        // Update database
+        try {
+          const { error } = await supabase
+            .from('sys_user')
+            .update({ last_seen: lastSeen.toISOString() })
+            .eq('sys_user_id', userId);
+          
+          if (error) throw error;
+        } catch (error) {
+          console.error('❌ Error updating heartbeat:', error);
+        }
       }
     }
   }
@@ -284,12 +281,11 @@ class UserStatusHandlers {
       return;
     }
     
-    if (this.onlineUsers.has(userId)) {
+    const isOnline = await this.isUserOnline(userId);
+    if (isOnline) {
       this.onlineUsers.delete(userId);
       
       const lastSeen = new Date();
-      
-      console.log(`❌ User ${userId} went offline (explicit logout)`);
       
       // Broadcast to all clients that this user is offline
       this.io.emit('userStatusChanged', {
@@ -297,8 +293,6 @@ class UserStatusHandlers {
         status: 'offline',
         lastSeen
       });
-      
-      console.log(`📡 Broadcasted offline status for user ${userId}`);
       
       // Update last_seen in database
       try {
@@ -308,31 +302,30 @@ class UserStatusHandlers {
           .eq('sys_user_id', userId);
         
         if (error) throw error;
-        
-        console.log(`💾 Updated database last_seen for user ${userId}`);
       } catch (error) {
         console.error('Error updating last_seen:', error);
       }
-    } else {
-      console.log(`⚠️ User ${userId} not found in onlineUsers Map (already offline or never online)`);
     }
   }
 
   /**
    * Handle get online users request
    */
-  handleGetOnlineUsers(socket) {
-    const onlineUsersList = Array.from(this.onlineUsers.entries()).map(([userId, data]) => ({
-      userId,
-      status: 'online',
-      lastSeen: data.lastSeen,
-      userType: data.userType,
-      userName: data.userName
-    }));
-    
-    console.log(`📋 getOnlineUsers request from ${socket.id}. Sending ${onlineUsersList.length} users`);
-    
-    socket.emit('onlineUsersList', onlineUsersList);
+  async handleGetOnlineUsers(socket) {
+    try {
+      const onlineUsersList = Array.from(this.onlineUsers.entries()).map(([userId, data]) => ({
+        userId: parseInt(userId),
+        status: 'online',
+        lastSeen: data.lastSeen,
+        userType: data.userType,
+        userName: data.userName
+      }));
+      
+      socket.emit('onlineUsersList', onlineUsersList);
+    } catch (error) {
+      console.error('❌ Error getting online users:', error.message);
+      socket.emit('onlineUsersList', []);
+    }
   }
 
   /**
@@ -342,16 +335,15 @@ class UserStatusHandlers {
     if (socket.userId) {
       const userId = socket.userId;
       
-      if (this.onlineUsers.has(userId)) {
+      const isOnline = await this.isUserOnline(userId);
+      if (isOnline) {
         const userData = this.onlineUsers.get(userId);
         
         // Only remove if this socket ID matches
-        if (userData.socketId === socket.id) {
+        if (userData && userData.socketId === socket.id) {
           this.onlineUsers.delete(userId);
           
           const lastSeen = new Date();
-          
-          console.log(`❌ User ${userId} disconnected and removed from online users`);
           
           // Broadcast to all clients that this user is offline
           this.io.emit('userStatusChanged', {
@@ -372,38 +364,74 @@ class UserStatusHandlers {
             console.error('❌ Error updating last_seen on disconnect:', error);
           }
         }
-      } else {
-        console.log(`⚠️ User ${userId} not found in onlineUsers Map`);
       }
-    } else {
-      console.log(`⚠️ Socket ${socket.id} disconnected without userId`);
     }
   }
 
   /**
-   * Get the online users map (for external access)
+   * Get the online users (for external access)
    */
-  getOnlineUsers() {
-    return this.onlineUsers;
+  async getOnlineUsers() {
+    try {
+      const onlineUsersObj = {};
+      for (const [userId, userData] of this.onlineUsers.entries()) {
+        onlineUsersObj[userId] = userData;
+      }
+      return onlineUsersObj;
+    } catch (error) {
+      console.error('❌ Error getting online users:', error.message);
+      return {};
+    }
   }
 
   /**
    * Get online users count
    */
-  getOnlineUsersCount() {
-    return this.onlineUsers.size;
+  async getOnlineUsersCount() {
+    try {
+      return this.onlineUsers.size;
+    } catch (error) {
+      console.error('❌ Error getting online users count:', error.message);
+      return 0;
+    }
   }
 
   /**
-   * Clean up rate limit data periodically
+   * Check if user is online
    */
-  cleanupRateLimits() {
+  async isUserOnline(userId) {
+    try {
+      return this.onlineUsers.has(userId);
+    } catch (error) {
+      console.error('❌ Error checking user online status:', error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Clean up rate limit data and stale users
+   */
+  async cleanupRateLimits() {
     const now = Date.now();
-    for (const [userId, limit] of this.rateLimits.entries()) {
-      if (now > limit.resetTime + 60000) { // Keep for 1 extra minute
-        this.rateLimits.delete(userId);
+    
+    // Clean up expired rate limiters
+    for (const [userId, rateLimitData] of this.rateLimiters.entries()) {
+      if (now > rateLimitData.resetTime) {
+        this.rateLimiters.delete(userId);
       }
     }
+    
+    // Clean up stale online users (older than 5 minutes)
+    const staleThreshold = 5 * 60 * 1000; // 5 minutes
+    for (const [userId, userData] of this.onlineUsers.entries()) {
+      const timeSinceLastSeen = now - new Date(userData.lastSeen).getTime();
+      if (timeSinceLastSeen > staleThreshold) {
+        this.onlineUsers.delete(userId);
+        console.log(`🧹 Removed stale user ${userId} from online users`);
+      }
+    }
+    
+    console.log('🧹 Rate limits and stale users cleaned up');
   }
 }
 

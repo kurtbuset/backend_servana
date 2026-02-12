@@ -41,20 +41,20 @@ class AuthController {
       // Link with system_user
       const sysUser = await authService.getSystemUserBySupabaseId(user.id);
 
-      // Create Redis session
-      const redisClient = req.app.get('redis');
+      // Create session with cache manager
+      const cache = req.app.get('cache');
       let sessionId = null;
       
-      if (redisClient) {
+      if (cache) {
         try {
-          sessionId = await sessionService.createSession(redisClient, sysUser.sys_user_id, {
+          sessionId = await sessionService.createSession(cache, sysUser.sys_user_id, {
             email: user.email,
             role_id: sysUser.role_id,
             supabase_id: user.id
           });
-          console.log(`🔑 Created Redis session: ${sessionId} for user: ${sysUser.sys_user_id}`);
+          console.log(`🔑 Created session: ${sessionId} for user: ${sysUser.sys_user_id}`);
         } catch (error) {
-          console.error('⚠️ Failed to create Redis session:', error.message);
+          console.error('⚠️ Failed to create session:', error.message);
         }
       }
 
@@ -143,22 +143,22 @@ class AuthController {
   }
 
   /**
-   * Check Redis session status
+   * Check session status
    */
   async checkSession(req, res) {
     try {
       const sessionId = req.cookies.session_id;
-      const redisClient = req.app.get('redis');
+      const cache = req.app.get('cache');
 
-      if (!redisClient) {
-        return res.status(503).json({ error: "Redis not available" });
+      if (!cache) {
+        return res.status(503).json({ error: "Cache not available" });
       }
 
       if (!sessionId) {
         return res.status(401).json({ error: "No session ID found" });
       }
 
-      const sessionData = await sessionService.getSession(redisClient, sessionId);
+      const sessionData = await sessionService.getSession(cache, sessionId);
 
       if (!sessionData) {
         return res.status(401).json({ error: "Session expired or invalid" });
@@ -186,15 +186,15 @@ class AuthController {
   async logout(req, res) {
     try {
       const sessionId = req.cookies.session_id;
-      const redisClient = req.app.get('redis');
+      const cache = req.app.get('cache');
 
-      // Delete Redis session if it exists
-      if (redisClient && sessionId) {
+      // Delete session if it exists
+      if (cache && sessionId) {
         try {
-          await sessionService.deleteSession(redisClient, sessionId);
-          console.log(`🔑 Deleted Redis session: ${sessionId}`);
+          await sessionService.deleteSession(cache, sessionId);
+          console.log(`🔑 Deleted session: ${sessionId}`);
         } catch (error) {
-          console.error('⚠️ Failed to delete Redis session:', error.message);
+          console.error('⚠️ Failed to delete session:', error.message);
         }
       }
 

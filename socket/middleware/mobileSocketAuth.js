@@ -43,7 +43,6 @@ class MobileSocketAuth {
         socket: socket
       };
     } catch (error) {
-      console.error('❌ Mobile authentication failed:', error.message);
       throw new Error(`Mobile authentication failed: ${error.message}`);
     }
   }
@@ -131,7 +130,6 @@ class MobileSocketAuth {
         .single();
 
       if (error) {
-        console.error('Database error fetching client:', error);
         throw new Error('Failed to fetch client data');
       }
 
@@ -225,7 +223,6 @@ class MobileSocketAuth {
 
       return null; // No refresh needed
     } catch (error) {
-      console.warn('Token refresh check failed:', error.message);
       return null;
     }
   }
