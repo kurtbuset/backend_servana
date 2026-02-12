@@ -1,27 +1,44 @@
 const express = require("express");
 const departmentService = require("../services/department.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
+const { checkPermission } = require("../middleware/checkPermission");
 
 class DepartmentController {
   getRouter() {
     const router = express.Router();
 
+    // Apply authentication middleware to all routes
     router.use(getCurrentUser);
 
-    // Get all departments
-    router.get("/", (req, res) => this.getAllDepartments(req, res));
+    // Get all departments - requires department management permission
+    router.get("/", 
+      checkPermission('priv_can_manage_dept'),
+      (req, res) => this.getAllDepartments(req, res)
+    );
 
-    // Add a new department
-    router.post("/", (req, res) => this.createDepartment(req, res));
+    // Add a new department - requires department management permission
+    router.post("/", 
+      checkPermission('priv_can_manage_dept'),
+      (req, res) => this.createDepartment(req, res)
+    );
 
-    // Update an existing department
-    router.put("/:id", (req, res) => this.updateDepartment(req, res));
+    // Update an existing department - requires department management permission
+    router.put("/:id", 
+      checkPermission('priv_can_manage_dept'),
+      (req, res) => this.updateDepartment(req, res)
+    );
 
-    // Toggle dept_is_active status
-    router.put("/:id/toggle", (req, res) => this.toggleDepartmentStatus(req, res));
+    // Toggle dept_is_active status - requires department management permission
+    router.put("/:id/toggle", 
+      checkPermission('priv_can_manage_dept'),
+      (req, res) => this.toggleDepartmentStatus(req, res)
+    );
 
-    // Get members of a department
-    router.get("/:id/members", (req, res) => this.getDepartmentMembers(req, res));
+    // Get members of a department - requires department management permission
+    router.get("/:id/members", 
+      checkPermission('priv_can_manage_dept'),
+      (req, res) => this.getDepartmentMembers(req, res)
+    );
 
     return router;
   }

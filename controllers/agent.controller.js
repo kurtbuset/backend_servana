@@ -1,24 +1,38 @@
 const express = require("express");
 const agentService = require("../services/agent.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
+const { checkPermission, checkAnyPermission } = require("../middleware/checkPermission");
 
 class AgentController {
   getRouter() {
     const router = express.Router();
 
+    // Apply authentication middleware to all routes
     router.use(getCurrentUser);
 
-    // Fetch all agents with their departments
-    router.get("/agents", (req, res) => this.getAllAgents(req, res));
+    // Fetch all agents with their departments - requires role management permission
+    router.get("/agents", 
+      checkAnyPermission(['priv_can_manage_role', 'priv_can_create_account']),
+      (req, res) => this.getAllAgents(req, res)
+    );
 
-    // Fetch all departments
-    router.get("/departments", (req, res) => this.getActiveDepartments(req, res));
+    // Fetch all departments - requires department management permission
+    router.get("/departments", 
+      checkPermission('priv_can_manage_dept'),
+      (req, res) => this.getActiveDepartments(req, res)
+    );
 
-    // Update agent
-    router.put("/agents/:id", (req, res) => this.updateAgent(req, res));
+    // Update agent - requires role management permission
+    router.put("/agents/:id", 
+      checkPermission('priv_can_manage_role'),
+      (req, res) => this.updateAgent(req, res)
+    );
 
-    // Create agent
-    router.post("/agents", (req, res) => this.createAgent(req, res));
+    // Create agent - requires account creation permission
+    router.post("/agents", 
+      checkPermission('priv_can_create_account'),
+      (req, res) => this.createAgent(req, res)
+    );
 
     return router;
   }
@@ -30,7 +44,7 @@ class AgentController {
       const agents = await agentService.getAllAgents();
       res.status(200).json(agents);
     } catch (err) {
-      console.error("Error fetching agents:", err.message);
+      console.error("❌ Error fetching agents:", err.message);
       res.status(500).json({ error: err.message });
     }
   }
@@ -43,7 +57,7 @@ class AgentController {
       const departments = await agentService.getActiveDepartments();
       res.status(200).json(departments);
     } catch (err) {
-      console.error("Error fetching departments:", err.message);
+      console.error("❌ Error fetching departments:", err.message);
       res.status(500).json({ error: err.message });
     }
   }
@@ -60,15 +74,15 @@ class AgentController {
       const sysUser = await agentService.getSystemUserById(id);
       const authUserId = sysUser.supabase_user_id;
 
-      // Update system_user
+      // Update system_user (includes cache invalidation)
       await agentService.updateSystemUser(id, email, active);
 
-      // Update sys_user_department
+      // Update sys_user_department (includes cache invalidation)
       if (departments) {
-        // Delete existing
+        // Delete existing (includes cache invalidation)
         await agentService.deleteUserDepartments(id);
 
-        // Insert new departments
+        // Insert new departments (includes cache invalidation)
         if (departments.length > 0) {
           const deptRows = await agentService.getDepartmentIdsByNames(departments);
           await agentService.insertUserDepartments(
@@ -85,7 +99,7 @@ class AgentController {
 
       res.status(200).json({ message: "Agent updated successfully" });
     } catch (err) {
-      console.error("Error updating agent:", err.message);
+      console.error("❌ Error updating agent:", err.message);
       res.status(500).json({ error: err.message });
     }
   }
@@ -105,7 +119,7 @@ class AgentController {
 
       res.status(201).json(result);
     } catch (err) {
-      console.error("Error adding new agent:", err.message);
+      console.error("❌ Error adding new agent:", err.message);
       res.status(500).json({ error: err.message });
     }
   }

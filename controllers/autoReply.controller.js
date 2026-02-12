@@ -1,27 +1,44 @@
 const express = require("express");
 const autoReplyService = require("../services/autoReply.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
+const { checkPermission } = require("../middleware/checkPermission");
 
 class AutoReplyController {
   getRouter() {
     const router = express.Router();
 
+    // Apply authentication middleware to all routes
     router.use(getCurrentUser);
 
-    // Get all auto replies
-    router.get("/", (req, res) => this.getAllAutoReplies(req, res));
+    // Get all auto replies - requires auto reply management permission
+    router.get("/", 
+      checkPermission('priv_can_manage_auto_reply'),
+      (req, res) => this.getAllAutoReplies(req, res)
+    );
 
-    // Get active departments
-    router.get("/departments/active", (req, res) => this.getActiveDepartments(req, res));
+    // Get active departments - requires auto reply management permission
+    router.get("/departments/active", 
+      checkPermission('priv_can_manage_auto_reply'),
+      (req, res) => this.getActiveDepartments(req, res)
+    );
 
-    // Get all departments
-    router.get("/departments/all", (req, res) => this.getAllDepartments(req, res));
+    // Get all departments - requires auto reply management permission
+    router.get("/departments/all", 
+      checkPermission('priv_can_manage_auto_reply'),
+      (req, res) => this.getAllDepartments(req, res)
+    );
 
-    // Create a new auto reply
-    router.post("/", (req, res) => this.createAutoReply(req, res));
+    // Create a new auto reply - requires auto reply management permission
+    router.post("/", 
+      checkPermission('priv_can_manage_auto_reply'),
+      (req, res) => this.createAutoReply(req, res)
+    );
 
-    // Update an auto reply
-    router.put("/:id", (req, res) => this.updateAutoReply(req, res));
+    // Update an auto reply - requires auto reply management permission
+    router.put("/:id", 
+      checkPermission('priv_can_manage_auto_reply'),
+      (req, res) => this.updateAutoReply(req, res)
+    );
 
     // Toggle auto reply active status
     router.patch("/:id/toggle", (req, res) => this.toggleAutoReplyStatus(req, res));

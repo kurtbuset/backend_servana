@@ -1,24 +1,38 @@
 const express = require("express");
 const adminService = require("../services/admin.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
+const { checkPermission } = require("../middleware/checkPermission");
 
 class AdminController {
   getRouter() {
     const router = express.Router();
 
+    // Apply authentication middleware to all routes
     router.use(getCurrentUser);
 
-    // Get all admins
-    router.get("/", (req, res) => this.getAllAdmins(req, res));
+    // Get all admins - requires account creation permission (admin-level)
+    router.get("/",
+      checkPermission('priv_can_create_account'),
+      (req, res) => this.getAllAdmins(req, res)
+    );
 
-    // Add a new admin
-    router.post("/", (req, res) => this.createAdmin(req, res));
+    // Add a new admin - requires account creation permission
+    router.post("/",
+      checkPermission('priv_can_create_account'),
+      (req, res) => this.createAdmin(req, res)
+    );
 
-    // Update an existing admin
-    router.put("/:id", (req, res) => this.updateAdmin(req, res));
+    // Update an existing admin - requires account creation permission
+    router.put("/:id",
+      checkPermission('priv_can_create_account'),
+      (req, res) => this.updateAdmin(req, res)
+    );
 
-    // Toggle active status
-    router.put("/:id/toggle", (req, res) => this.toggleAdminStatus(req, res));
+    // Toggle active status - requires account creation permission
+    router.put("/:id/toggle",
+      checkPermission('priv_can_create_account'),
+      (req, res) => this.toggleAdminStatus(req, res)
+    );
 
     return router;
   }
