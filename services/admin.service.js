@@ -24,39 +24,48 @@ class AdminService {
    */
   async getAllAdmins() {
     const adminRoleId = await this.getAdminRoleId();
-
+    // Single optimized query with joins 
     const { data, error } = await supabase
       .from("sys_user")
-      .select("sys_user_id, sys_user_email, sys_user_is_active, supabase_user_id, prof_id")
+      .select(`
+        sys_user_id,
+        sys_user_email,
+        sys_user_is_active,
+        supabase_user_id,
+        prof_id,
+        profile:profile(
+          image:image!prof_id(
+            img_location,
+            img_is_current
+          )
+        )
+      `)
       .eq("role_id", adminRoleId)
       .order("sys_user_email", { ascending: true });
 
     if (error) throw error;
 
-    // Fetch profile pictures for all admins
-    const adminsWithPictures = await Promise.all(
-      data.map(async (admin) => {
-        let profile_picture = "profile_picture/DefaultProfile.jpg";
+    // Process results in memory to extract profile pictures
+    const adminsWithPictures = data.map((admin) => {
+      let profile_picture = "profile_picture/DefaultProfile.jpg";
 
-        if (admin.prof_id) {
-          const { data: imageData } = await supabase
-            .from("image")
-            .select("img_location")
-            .eq("prof_id", admin.prof_id)
-            .eq("img_is_current", true)
-            .single();
-
-          if (imageData?.img_location) {
-            profile_picture = imageData.img_location;
-          }
+      // Find current profile image from joined data
+      if (admin.profile?.image) {
+        const currentImage = admin.profile.image.find(img => img.img_is_current === true);
+        if (currentImage?.img_location) {
+          profile_picture = currentImage.img_location;
         }
+      }
 
-        return {
-          ...admin,
-          profile_picture,
-        };
-      })
-    );
+      return {
+        sys_user_id: admin.sys_user_id,
+        sys_user_email: admin.sys_user_email,
+        sys_user_is_active: admin.sys_user_is_active,
+        supabase_user_id: admin.supabase_user_id,
+        prof_id: admin.prof_id,
+        profile_picture,
+      };
+    });
 
     return adminsWithPictures;
   }

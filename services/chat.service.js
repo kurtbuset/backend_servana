@@ -187,10 +187,12 @@ class ChatService {
       let cachedMessages = [];
       if (!before && limit <= 50) {
         // Only use cache for recent messages (no pagination)
-        for (const groupId of groupIds) {
-          const messages = await cacheService.getChatMessages(groupId);
-          cachedMessages.push(...messages);
-        }
+        // OPTIMIZED: Batch cache retrieval using Promise.all instead of sequential loop
+        const cachePromises = groupIds.map(groupId => cacheService.getChatMessages(groupId));
+        const cachedMessageArrays = await Promise.all(cachePromises);
+        
+        // Flatten all cached messages
+        cachedMessages = cachedMessageArrays.flat();
         
         if (cachedMessages.length > 0) {
           // Sort and limit cached messages
@@ -274,11 +276,19 @@ class ChatService {
 
       // Cache recent messages if this was a fresh fetch
       if (!before && messages.length > 0) {
-        for (const groupId of groupIds) {
+        // OPTIMIZED: Batch cache storage using Promise.all instead of sequential loop
+        const cachePromises = groupIds.map(groupId => {
           const groupMessages = messages.filter(m => m.chat_group_id === groupId);
           if (groupMessages.length > 0) {
-            await cacheService.cacheChatMessages(groupId, groupMessages);
+            return cacheService.cacheChatMessages(groupId, groupMessages);
           }
+          return Promise.resolve(); // Return resolved promise for groups with no messages
+        }).filter(promise => promise !== Promise.resolve()); // Remove empty promises
+
+        // Execute all cache operations in parallel
+        if (cachePromises.length > 0) {
+          await Promise.all(cachePromises);
+          console.log(`✅ Cached messages for ${cachePromises.length} chat groups in parallel`);
         }
       }
 

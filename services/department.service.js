@@ -72,7 +72,6 @@ class DepartmentService {
       
       // Invalidate cache to ensure fresh data on next read
       await cacheService.invalidateDepartments();
-      await this.invalidateDepartmentMembersCache();
       console.log("🧹 Invalidated departments cache after creation");
       
       return data;
@@ -99,7 +98,6 @@ class DepartmentService {
       
       // Invalidate cache to ensure fresh data on next read
       await cacheService.invalidateDepartments();
-      await this.invalidateDepartmentMembersCache();
       console.log("🧹 Invalidated departments cache after update");
       
       return data;
@@ -130,7 +128,6 @@ class DepartmentService {
       
       // Invalidate cache to ensure fresh data on next read
       await cacheService.invalidateDepartments();
-      await this.invalidateDepartmentMembersCache();
       console.log("🧹 Invalidated departments cache after status toggle");
       
       return data;
