@@ -1,5 +1,5 @@
 require("dotenv").config();
-const supabase = require("../config/supabase.js");
+const supabase = require("../helpers/supabaseClient");
 
 const isProduction = process.env.NODE_ENV === "production";
 

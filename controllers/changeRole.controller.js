@@ -1,6 +1,8 @@
 const express = require("express");
 const changeRoleService = require("../services/changeRole.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
+const { checkPermission } = require("../middleware/checkPermission");
+const { PERMISSIONS } = require("../constants/permissions")
 
 class ChangeRoleController {
   getRouter() {
@@ -8,14 +10,23 @@ class ChangeRoleController {
 
     router.use(getCurrentUser);
 
-    // Get all users with their roles
-    router.get("/", (req, res) => this.getAllUsersWithRoles(req, res));
+    // Get all users with their roles - requires role assignment permission
+    router.get("/", 
+      checkPermission(PERMISSIONS.ASSIGN_ROLE),
+      (req, res) => this.getAllUsersWithRoles(req, res)
+    );
 
-    // Get all roles (active + inactive)
-    router.get("/roles", (req, res) => this.getAllRoles(req, res));
+    // Get all roles (active + inactive) - requires role assignment permission
+    router.get("/roles", 
+      checkPermission(PERMISSIONS.ASSIGN_ROLE),
+      (req, res) => this.getAllRoles(req, res)
+    );
 
-    // Update a user's role or active status
-    router.put("/:id", (req, res) => this.updateUserRole(req, res));
+    // Update a user's role or active status - requires role assignment permission
+    router.put("/:id", 
+      checkPermission(PERMISSIONS.ASSIGN_ROLE),
+      (req, res) => this.updateUserRole(req, res)
+    );
 
     return router;
   }

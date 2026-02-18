@@ -1,6 +1,6 @@
 const supabase = require("../../helpers/supabaseClient");
 const { v4: uuidv4 } = require("uuid");
-const jwtUtils = require("../../src/utils/jwt");
+const jwtUtils = require("../../utils/jwt");
 
 const OTP_LENGTH = 6;
 

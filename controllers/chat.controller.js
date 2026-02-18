@@ -1,6 +1,8 @@
 const express = require("express");
 const chatService = require("../services/chat.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
+const { checkPermission } = require("../middleware/checkPermission");
+const { PERMISSIONS } = require("../constants/permissions")
 
 class ChatController {
   getRouter() {
@@ -8,19 +10,31 @@ class ChatController {
 
     router.use(getCurrentUser);
 
-    // Get canned messages for current user's role
-    router.get("/canned-messages", (req, res) => this.getCannedMessages(req, res));
+    // Get canned messages for current user's role - requires canned message permission
+    router.get("/canned-messages", 
+      checkPermission(PERMISSIONS.USE_CANNED_MESS),
+      (req, res) => this.getCannedMessages(req, res)
+    );
 
-    // Get all chat groups for current user
-    router.get("/chatgroups", (req, res) => this.getChatGroups(req, res));
+    // Get all chat groups for current user - requires message viewing permission
+    router.get("/chatgroups", 
+      checkPermission(PERMISSIONS.VIEW_MESSAGE),
+      (req, res) => this.getChatGroups(req, res)
+    );
 
-    // Transfer chat group to another department
-    router.post("/:chatGroupId/transfer", (req, res) => this.transferChatGroup(req, res));
+    // Transfer chat group to another department - requires message viewing permission
+    router.post("/:chatGroupId/transfer", 
+      checkPermission(PERMISSIONS.CAN_TRANSFER),
+      (req, res) => this.transferChatGroup(req, res)
+    );
 
-    // Get chat messages for a specific client
-    router.get("/:clientId", (req, res) => this.getChatMessages(req, res));
-
-    // Get room statistics (for monitoring)
+    // Get chat messages for a specific client - requires message viewing permission
+    router.get("/:clientId", 
+      checkPermission(PERMISSIONS.VIEW_MESSAGE),
+      (req, res) => this.getChatMessages(req, res)
+    );
+    
+    // Get room statistics (for monitoring) - no specific permission needed for now
     router.get("/admin/room-stats", (req, res) => this.getRoomStats(req, res));
 
     return router;
