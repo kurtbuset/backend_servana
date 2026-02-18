@@ -372,42 +372,116 @@ class ProfileService {
         return { processed: 0, successful: 0, failed: 0 };
       }
 
-      let successful = 0;
-      let failed = 0;
+      console.log(`🔄 Processing ${usersWithoutProfiles.length} users without profiles using batch operations`);
 
-      for (const user of usersWithoutProfiles) {
-        try {
-          // Create minimal profile
-          const profile = await this.createMinimalProfile();
+      try {
+        // Step 1: Batch create profiles for all users
+        const profilesData = usersWithoutProfiles.map(() => ({
+          prof_firstname: '',
+          prof_middlename: '',
+          prof_lastname: '',
+          prof_address: '',
+          prof_date_of_birth: null,
+        }));
 
-          // Link profile to user
-          const { error: updateError } = await supabase
-            .from("sys_user")
-            .update({ 
-              prof_id: profile.prof_id,
-              sys_user_updated_at: new Date().toISOString()
-            })
-            .eq("sys_user_id", user.sys_user_id);
+        const { data: createdProfiles, error: profileError } = await supabase
+          .from("profile")
+          .insert(profilesData)
+          .select("prof_id");
 
-          if (updateError) {
-            console.error(`❌ Failed to link profile ${profile.prof_id} to user ${user.sys_user_id}:`, updateError);
-            failed++;
-          } else {
-            successful++;
-          }
-        } catch (error) {
-          console.error(`❌ Failed to process user ${user.sys_user_id}:`, error.message);
-          failed++;
+        if (profileError) {
+          console.error('❌ Batch profile creation failed:', profileError);
+          throw profileError;
         }
+
+        if (!createdProfiles || createdProfiles.length !== usersWithoutProfiles.length) {
+          throw new Error(`Profile creation mismatch: expected ${usersWithoutProfiles.length}, got ${createdProfiles?.length || 0}`);
+        }
+
+        console.log(`✅ Successfully created ${createdProfiles.length} profiles in batch`);
+
+        // Step 2: Batch update users with their profile IDs
+        const userUpdates = usersWithoutProfiles.map((user, index) => ({
+          sys_user_id: user.sys_user_id,
+          prof_id: createdProfiles[index].prof_id,
+          sys_user_updated_at: new Date().toISOString()
+        }));
+
+        // Use upsert to update users with their profile IDs
+        const { error: updateError } = await supabase
+          .from("sys_user")
+          .upsert(userUpdates, { 
+            onConflict: 'sys_user_id',
+            ignoreDuplicates: false 
+          });
+
+        if (updateError) {
+          console.error('❌ Batch user update failed:', updateError);
+          
+          // Rollback: Delete the created profiles
+          const profileIds = createdProfiles.map(p => p.prof_id);
+          await supabase
+            .from("profile")
+            .delete()
+            .in("prof_id", profileIds);
+          
+          throw updateError;
+        }
+
+        console.log(`✅ Successfully linked ${userUpdates.length} users to their profiles in batch`);
+
+        const result = {
+          processed: usersWithoutProfiles.length,
+          successful: usersWithoutProfiles.length,
+          failed: 0
+        };
+
+        console.log(`✅ Batch backfill completed: ${result.successful}/${result.processed} users processed successfully`);
+        return result;
+
+      } catch (batchError) {
+        console.error('❌ Batch operation failed, falling back to individual processing:', batchError.message);
+        
+        // Fallback to individual processing for partial recovery
+        let successful = 0;
+        let failed = 0;
+
+        for (const user of usersWithoutProfiles) {
+          try {
+            // Create minimal profile
+            const profile = await this.createMinimalProfile();
+
+            // Link profile to user
+            const { error: updateError } = await supabase
+              .from("sys_user")
+              .update({ 
+                prof_id: profile.prof_id,
+                sys_user_updated_at: new Date().toISOString()
+              })
+              .eq("sys_user_id", user.sys_user_id);
+
+            if (updateError) {
+              console.error(`❌ Failed to link profile ${profile.prof_id} to user ${user.sys_user_id}:`, updateError);
+              failed++;
+            } else {
+              successful++;
+            }
+          } catch (error) {
+            console.error(`❌ Failed to process user ${user.sys_user_id}:`, error.message);
+            failed++;
+          }
+        }
+
+        const fallbackResult = {
+          processed: usersWithoutProfiles.length,
+          successful,
+          failed
+        };
+
+        console.log(`⚠️ Fallback processing completed: ${successful}/${usersWithoutProfiles.length} users processed successfully`);
+        return fallbackResult;
       }
 
-      const result = {
-        processed: usersWithoutProfiles.length,
-        successful,
-        failed
-      };
-
-      return result;
     } catch (error) {
       console.error('❌ Error in backfillMissingProfiles:', error.message);
       throw error;

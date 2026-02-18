@@ -395,9 +395,7 @@ class SecurityLogger {
     const emoji = this.getEventEmoji(logEntry.level);
     const timestamp = new Date(logEntry.timestamp).toLocaleTimeString();
     
-    // console.log(`${emoji} [${timestamp}] ${logEntry.eventType} (${logEntry.level})`);
     if (logEntry.details && Object.keys(logEntry.details).length > 0) {
-      // console.log('Details:', JSON.stringify(logEntry.details, null, 2));
     }
   }
 

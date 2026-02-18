@@ -80,19 +80,16 @@ class DepartmentController {
   async updateDepartment(req, res) {
     try {
       const { id } = req.params;
-      const { dept_name, dept_is_active, dept_updated_by } = req.body;
+      const { dept_name, dept_updated_by } = req.body;
 
-      if (!dept_updated_by) {
-        return res.status(400).json({ error: "dept_updated_by is required" });
+      if (!dept_name || !dept_updated_by) {
+        return res.status(400).json({ error: "dept_name and dept_updated_by are required" });
       }
 
       const updateData = {
-        dept_updated_at: new Date(),
-        dept_updated_by,
+        dept_name,
+        dept_updated_by
       };
-
-      if (dept_name !== undefined) updateData.dept_name = dept_name;
-      if (dept_is_active !== undefined) updateData.dept_is_active = dept_is_active;
 
       const department = await departmentService.updateDepartment(id, updateData);
       res.status(200).json(department);
