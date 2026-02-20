@@ -5,8 +5,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install ALL dependencies (including devDependencies for nodemon)
+RUN npm ci
 
 # Copy source code
 COPY . .
@@ -26,5 +26,5 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node healthcheck.js || exit 1
 
-# Start the application
+# Start the application (can be overridden by docker-compose)
 CMD ["npm", "start"]
