@@ -33,6 +33,7 @@ class ClientAccountService {
 
   /**
    * Check if OTP already exists and is verified
+   * Also checks rate limiting (3 requests per hour)
    */
   async checkExistingOtp(phoneCountryCode, phoneNumber) {
     const { data, error } = await supabase
@@ -47,9 +48,43 @@ class ClientAccountService {
   }
 
   /**
-   * Upsert OTP
+   * Check rate limiting for OTP requests
+   * Returns the count of OTP requests in the last hour
    */
-  async upsertOtp(phoneCountryCode, phoneNumber, otpHash, expiresAt) {
+  async checkRateLimit(phoneCountryCode, phoneNumber) {
+    const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
+
+    const { data, error } = await supabase
+      .from("otp_sms")
+      .select("created_at")
+      .eq("phone_country_code", phoneCountryCode)
+      .eq("phone_number", phoneNumber)
+      .gte("created_at", oneHourAgo);
+
+    if (error) {
+      throw new Error("Failed to check rate limit");
+    }
+
+    return data ? data.length : 0;
+  }
+
+  /**
+   * Upsert OTP
+   * @param {string} phoneCountryCode - Phone country code
+   * @param {string} phoneNumber - Phone number
+   * @param {string} otpHash - Hashed OTP
+   * @param {string} expiresAt - Expiration timestamp
+   * @param {string} otpType - Type of OTP ('registration' or 'login')
+   * @param {number|null} clientId - Client ID (for login OTPs)
+   */
+  async upsertOtp(
+    phoneCountryCode,
+    phoneNumber,
+    otpHash,
+    expiresAt,
+    otpType = "registration",
+    clientId = null,
+  ) {
     const { error } = await supabase.from("otp_sms").upsert(
       {
         otp_id: uuidv4(),
@@ -57,10 +92,12 @@ class ClientAccountService {
         phone_number: phoneNumber,
         otp_hash: otpHash,
         expires_at: expiresAt,
+        otp_type: otpType,
+        client_id: clientId,
         verified: false,
         attempts: 0,
       },
-      { onConflict: ["phone_number"] }
+      { onConflict: ["phone_number"] },
     );
 
     if (error) throw error;
@@ -68,6 +105,7 @@ class ClientAccountService {
 
   /**
    * Get OTP data
+   * Returns all OTP fields including otp_type and client_id
    */
   async getOtpData(phoneCountryCode, phoneNumber) {
     const { data, error } = await supabase
@@ -98,7 +136,10 @@ class ClientAccountService {
    * Mark OTP as verified
    */
   async markOtpAsVerified(otpId) {
-    await supabase.from("otp_sms").update({ verified: true }).eq("otp_id", otpId);
+    await supabase
+      .from("otp_sms")
+      .update({ verified: true })
+      .eq("otp_id", otpId);
   }
 
   /**
@@ -124,9 +165,44 @@ class ClientAccountService {
   }
 
   /**
+   * Create minimal profile (firstname and lastname only)
+   * Used for optional profile completion in passwordless auth
+   */
+  async createProfileMinimal(firstName, lastName) {
+    const { data, error } = await supabase
+      .from("profile")
+      .insert({
+        prof_firstname: firstName,
+        prof_lastname: lastName,
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      throw new Error("Failed to create profile");
+    }
+
+    return data;
+  }
+
+  /**
+   * Link profile to client
+   */
+  async linkProfileToClient(clientId, profId) {
+    const { error } = await supabase
+      .from("client")
+      .update({ prof_id: profId })
+      .eq("client_id", clientId);
+
+    if (error) {
+      throw new Error("Failed to link profile to client");
+    }
+  }
+
+  /**
    * Create client
    */
-  async createClient(phoneCountryCode, phoneNumber, hashedPassword, profId) {
+  async createClient(phoneCountryCode, phoneNumber, profId) {
     const clientRoleId = await this.getClientRoleId();
 
     const { data, error } = await supabase
@@ -134,7 +210,6 @@ class ClientAccountService {
       .insert({
         client_country_code: phoneCountryCode,
         client_number: phoneNumber,
-        client_password: hashedPassword,
         prof_id: profId,
         client_updated_at: new Date().toISOString(),
         client_is_active: true,
@@ -155,7 +230,10 @@ class ClientAccountService {
    * Delete OTP
    */
   async deleteOtp(otpId) {
-    await supabase.from("otp_sms").delete().eq("otp_id", otpId);
+    await supabase
+      .from("otp_sms")
+      .delete()
+      .eq("otp_id", otpId);
   }
 
   /**
@@ -164,7 +242,8 @@ class ClientAccountService {
   async getClientByPhone(phoneCountryCode, phoneNumber) {
     const { data, error } = await supabase
       .from("client")
-      .select(`
+      .select(
+        `
         *,
         prof_id (
           prof_id,
@@ -177,26 +256,100 @@ class ClientAccountService {
           prof_region_info,
           prof_postal_code
         )
-      `)
+      `,
+      )
       .eq("client_country_code", phoneCountryCode)
       .eq("client_number", phoneNumber)
       .single();
 
     if (error || !data) {
-      throw new Error("Invalid phone number or password");
+      throw new Error("Client not found");
     }
 
     return data;
+  }
+  /**
+   * Check if client exists by phone number (without password check)
+   */
+  async checkClientExists(phoneCountryCode, phoneNumber) {
+    const { data, error } = await supabase
+      .from("client")
+      .select("client_id")
+      .eq("client_country_code", phoneCountryCode)
+      .eq("client_number", phoneNumber)
+      .single();
+
+    return { exists: !!data, clientId: data?.client_id || null };
   }
 
   /**
    * Generate JWT token
    */
   generateToken(clientId, clientNumber) {
-    return jwtUtils.generateAccessToken({ 
-      client_id: clientId, 
-      client_number: clientNumber 
+    return jwtUtils.generateAccessToken({
+      client_id: clientId,
+      client_number: clientNumber,
     });
+  }
+
+  /**
+   * Generate long-lived JWT token (30 days)
+   * Used for passwordless authentication
+   */
+  generateLongLivedToken(clientId, clientNumber) {
+    const jwt = require("jsonwebtoken");
+    const config = require("../../config/app");
+
+    return jwt.sign(
+      {
+        client_id: clientId,
+        client_number: clientNumber,
+        type: "client",
+      },
+      config.jwt.accessSecret,
+      { expiresIn: "30d" },
+    );
+  }
+
+  /**
+   * Create client without password (for passwordless auth)
+   */
+  async createClientWithoutPassword(phoneCountryCode, phoneNumber) {
+    const clientRoleId = await this.getClientRoleId();
+
+    const { data, error } = await supabase
+      .from("client")
+      .insert({
+        client_country_code: phoneCountryCode,
+        client_number: phoneNumber,
+        prof_id: null, // No profile yet
+        client_updated_at: new Date().toISOString(),
+        client_is_active: true,
+        role_id: clientRoleId,
+      })
+      .select(
+        `
+        *,
+        prof_id (
+          prof_id,
+          prof_firstname,
+          prof_middlename,
+          prof_lastname,
+          prof_address,
+          prof_date_of_birth,
+          prof_street_address,
+          prof_region_info,
+          prof_postal_code
+        )
+      `,
+      )
+      .single();
+
+    if (error || !data) {
+      throw new Error("Failed to create client");
+    }
+
+    return data;
   }
 
   /**
