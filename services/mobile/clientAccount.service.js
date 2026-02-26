@@ -1,8 +1,5 @@
 const supabase = require("../../helpers/supabaseClient");
-const { v4: uuidv4 } = require("uuid");
 const jwtUtils = require("../../utils/jwt");
-
-const OTP_LENGTH = 6;
 
 class ClientAccountService {
   /**
@@ -23,16 +20,8 @@ class ClientAccountService {
   }
 
   /**
-   * Generate OTP
-   */
-  generateOtp(length = OTP_LENGTH) {
-    let otp = "";
-    for (let i = 0; i < length; i++) otp += Math.floor(Math.random() * 10);
-    return otp;
-  }
-
-  /**
    * Check if OTP already exists and is verified
+   * Also checks rate limiting (3 requests per hour)
    */
   async checkExistingOtp(phoneCountryCode, phoneNumber) {
     const { data, error } = await supabase
@@ -44,61 +33,6 @@ class ClientAccountService {
       .single();
 
     return { data, error };
-  }
-
-  /**
-   * Upsert OTP
-   */
-  async upsertOtp(phoneCountryCode, phoneNumber, otpHash, expiresAt) {
-    const { error } = await supabase.from("otp_sms").upsert(
-      {
-        otp_id: uuidv4(),
-        phone_country_code: phoneCountryCode,
-        phone_number: phoneNumber,
-        otp_hash: otpHash,
-        expires_at: expiresAt,
-        verified: false,
-        attempts: 0,
-      },
-      { onConflict: ["phone_number"] }
-    );
-
-    if (error) throw error;
-  }
-
-  /**
-   * Get OTP data
-   */
-  async getOtpData(phoneCountryCode, phoneNumber) {
-    const { data, error } = await supabase
-      .from("otp_sms")
-      .select("*")
-      .eq("phone_country_code", phoneCountryCode)
-      .eq("phone_number", phoneNumber)
-      .single();
-
-    if (error || !data) {
-      throw new Error("OTP not found");
-    }
-
-    return data;
-  }
-
-  /**
-   * Increment OTP attempts
-   */
-  async incrementOtpAttempts(otpId, currentAttempts) {
-    await supabase
-      .from("otp_sms")
-      .update({ attempts: currentAttempts + 1 })
-      .eq("otp_id", otpId);
-  }
-
-  /**
-   * Mark OTP as verified
-   */
-  async markOtpAsVerified(otpId) {
-    await supabase.from("otp_sms").update({ verified: true }).eq("otp_id", otpId);
   }
 
   /**
@@ -124,9 +58,44 @@ class ClientAccountService {
   }
 
   /**
+   * Create minimal profile (firstname and lastname only)
+   * Used for optional profile completion in passwordless auth
+   */
+  async createProfileMinimal(firstName, lastName) {
+    const { data, error } = await supabase
+      .from("profile")
+      .insert({
+        prof_firstname: firstName,
+        prof_lastname: lastName,
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      throw new Error("Failed to create profile");
+    }
+
+    return data;
+  }
+
+  /**
+   * Link profile to client
+   */
+  async linkProfileToClient(clientId, profId) {
+    const { error } = await supabase
+      .from("client")
+      .update({ prof_id: profId })
+      .eq("client_id", clientId);
+
+    if (error) {
+      throw new Error("Failed to link profile to client");
+    }
+  }
+
+  /**
    * Create client
    */
-  async createClient(phoneCountryCode, phoneNumber, hashedPassword, profId) {
+  async createClient(phoneCountryCode, phoneNumber, profId) {
     const clientRoleId = await this.getClientRoleId();
 
     const { data, error } = await supabase
@@ -134,7 +103,6 @@ class ClientAccountService {
       .insert({
         client_country_code: phoneCountryCode,
         client_number: phoneNumber,
-        client_password: hashedPassword,
         prof_id: profId,
         client_updated_at: new Date().toISOString(),
         client_is_active: true,
@@ -152,19 +120,23 @@ class ClientAccountService {
   }
 
   /**
-   * Delete OTP
+   * Create client without password (for passwordless auth)
    */
-  async deleteOtp(otpId) {
-    await supabase.from("otp_sms").delete().eq("otp_id", otpId);
-  }
+  async createClientWithoutPassword(phoneCountryCode, phoneNumber) {
+    const clientRoleId = await this.getClientRoleId();
 
-  /**
-   * Get client by phone number
-   */
-  async getClientByPhone(phoneCountryCode, phoneNumber) {
     const { data, error } = await supabase
       .from("client")
-      .select(`
+      .insert({
+        client_country_code: phoneCountryCode,
+        client_number: phoneNumber,
+        prof_id: null, // No profile yet
+        client_updated_at: new Date().toISOString(),
+        client_is_active: true,
+        role_id: clientRoleId,
+      })
+      .select(
+        `
         *,
         prof_id (
           prof_id,
@@ -177,26 +149,261 @@ class ClientAccountService {
           prof_region_info,
           prof_postal_code
         )
-      `)
-      .eq("client_country_code", phoneCountryCode)
-      .eq("client_number", phoneNumber)
+      `,
+      )
       .single();
 
     if (error || !data) {
-      throw new Error("Invalid phone number or password");
+      throw new Error("Failed to create client");
     }
 
     return data;
   }
 
   /**
+   * VALIDATE TOKEN - Main business logic
+   * Validates JWT and checks if client exists and is active
+   */
+  async validateTokenFlow(clientId) {
+    // Check if client exists and is active
+    const { data: client, error: clientError } = await supabase
+      .from("client")
+      .select(
+        `
+        client_id,
+        client_country_code,
+        client_number,
+        client_is_active,
+        prof_id (
+          prof_id,
+          prof_firstname,
+          prof_lastname,
+          prof_middlename
+        )
+      `,
+      )
+      .eq("client_id", clientId)
+      .single();
+
+    if (clientError || !client) {
+      throw new Error("Client not found");
+    }
+
+    if (!client.client_is_active) {
+      throw new Error("Account is inactive");
+    }
+
+    return client;
+  }
+
+  /**
+   * COMPLETE PROFILE - Main business logic
+   * Creates or updates client profile
+   */
+  async completeProfileFlow(clientId, firstname, lastname) {
+    // 1. Get client
+    const { data: client, error: clientError } = await supabase
+      .from("client")
+      .select("prof_id")
+      .eq("client_id", clientId)
+      .single();
+
+    if (clientError || !client) {
+      throw new Error("Client not found");
+    }
+
+    // 2. Create or update profile
+    let profile;
+    let isUpdate = false;
+
+    if (client.prof_id) {
+      // Update existing profile
+      profile = await this.updateProfile(client.prof_id, {
+        prof_firstname: firstname,
+        prof_lastname: lastname,
+      });
+      isUpdate = true;
+    } else {
+      // Create new profile
+      profile = await this.createProfileMinimal(firstname, lastname);
+
+      // Link profile to client
+      await this.linkProfileToClient(clientId, profile.prof_id);
+    }
+
+    return {
+      profile,
+      isUpdate,
+    };
+  }
+
+  /**
+   * SET CHAT GROUP DEPARTMENT - Main business logic
+   * Assigns department to chat group and creates initial message
+   */
+  async setChatGroupDepartmentFlow(chatGroupId, deptId) {
+    // 1. Update chat group
+    const updatedGroup = await this.updateChatGroupDepartment(
+      chatGroupId,
+      deptId,
+    );
+
+    // 2. Get department name
+    const deptName = await this.getDepartmentName(deptId);
+
+    // 3. Insert initial message
+    await this.insertInitialMessage(chatGroupId, deptName);
+
+    return {
+      updatedGroup,
+      deptName,
+    };
+  }
+
+  /**
+   * UPDATE PROFILE - Main business logic
+   * Updates client profile with validation
+   */
+  async updateProfileFlow(profId, profileData) {
+    // Validate required fields (only firstname is required)
+    if (!profileData.prof_firstname) {
+      throw new Error("First name is required");
+    }
+
+    // Update profile
+    const profile = await this.updateProfile(profId, profileData);
+
+    return profile;
+  }
+
+  /**
+   * SEND CLIENT MESSAGE - Main business logic
+   * Sends message from client with chat group management
+   */
+  async sendClientMessageFlow(message, clientId, deptId) {
+    if (!message || !clientId) {
+      throw new Error("Missing message or clientId");
+    }
+
+    const messageData = await this.sendClientMessage(message, clientId, deptId);
+
+    return messageData;
+  }
+
+  /**
+   * Get client by phone number
+   */
+  async getClientByPhone(phoneCountryCode, phoneNumber) {
+    const { data, error } = await supabase
+      .from("client")
+      .select(
+        `
+        *,
+        prof_id (
+          prof_id,
+          prof_firstname,
+          prof_middlename,
+          prof_lastname,
+          prof_address,
+          prof_date_of_birth,
+          prof_street_address,
+          prof_region_info,
+          prof_postal_code
+        )
+      `,
+      )
+      .eq("client_country_code", phoneCountryCode)
+      .eq("client_number", phoneNumber)
+      .single();
+
+    if (error || !data) {
+      throw new Error("Client not found");
+    }
+
+    return data;
+  }
+  /**
+   * Check if client exists by phone number (without password check)
+   */
+  async checkClientExists(phoneCountryCode, phoneNumber) {
+    const { data, error } = await supabase
+      .from("client")
+      .select("client_id")
+      .eq("client_country_code", phoneCountryCode)
+      .eq("client_number", phoneNumber)
+      .single();
+
+    return { exists: !!data, clientId: data?.client_id || null };
+  }
+
+  /**
    * Generate JWT token
    */
   generateToken(clientId, clientNumber) {
-    return jwtUtils.generateAccessToken({ 
-      client_id: clientId, 
-      client_number: clientNumber 
+    return jwtUtils.generateAccessToken({
+      client_id: clientId,
+      client_number: clientNumber,
     });
+  }
+
+  /**
+   * Generate long-lived JWT token (30 days)
+   * Used for passwordless authentication
+   */
+  generateLongLivedToken(clientId, clientNumber) {
+    const jwt = require("jsonwebtoken");
+    const config = require("../../config/app");
+
+    return jwt.sign(
+      {
+        client_id: clientId,
+        client_number: clientNumber,
+        type: "client",
+      },
+      config.jwt.accessSecret,
+      { expiresIn: "30d" },
+    );
+  }
+
+  /**
+   * Create client without password (for passwordless auth)
+   */
+  async createClientWithoutPassword(phoneCountryCode, phoneNumber) {
+    const clientRoleId = await this.getClientRoleId();
+
+    const { data, error } = await supabase
+      .from("client")
+      .insert({
+        client_country_code: phoneCountryCode,
+        client_number: phoneNumber,
+        prof_id: null, // No profile yet
+        client_updated_at: new Date().toISOString(),
+        client_is_active: true,
+        role_id: clientRoleId,
+      })
+      .select(
+        `
+        *,
+        prof_id (
+          prof_id,
+          prof_firstname,
+          prof_middlename,
+          prof_lastname,
+          prof_address,
+          prof_date_of_birth,
+          prof_street_address,
+          prof_region_info,
+          prof_postal_code
+        )
+      `,
+      )
+      .single();
+
+    if (error || !data) {
+      throw new Error("Failed to create client");
+    }
+
+    return data;
   }
 
   /**

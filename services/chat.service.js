@@ -3,10 +3,6 @@ const cacheService = require("./cache.service");
 const cookie = require("cookie");
 
 class ChatService {
-  constructor() {
-    // Using centralized cache manager now
-  }
-
   /**
    * Get canned messages for a specific role filtered by user's assigned departments
    */

@@ -1,210 +1,106 @@
 const express = require("express");
 const clientAccountService = require("../../services/mobile/clientAccount.service");
-const bcrypt = require("bcrypt");
 const getCurrentMobileUser = require("../../middleware/getCurrentMobileUser");
 
 class ClientAccountController {
   getRouter() {
     const router = express.Router();
 
-    // Public routes (no authentication required)
-    router.post("/auth/send-otp", (req, res) => this.sendOtp(req, res));
-    router.post("/auth/verify-otp", (req, res) => this.verifyOtp(req, res));
-    router.post("/auth/complete-registration", (req, res) => this.completeRegistration(req, res));
-    router.post("/logincl", (req, res) => this.loginClient(req, res));
-
     // Protected routes (authentication required)
-    router.patch("/chat_group/:id/set-department", getCurrentMobileUser, (req, res) => this.setChatGroupDepartment(req, res));
-    router.put("/:prof_id", getCurrentMobileUser, (req, res) => this.updateProfile(req, res));
-    router.post("/client", getCurrentMobileUser, (req, res) => this.sendClientMessage(req, res));
+    router.get("/auth/validate", getCurrentMobileUser, (req, res) =>
+      this.validateToken(req, res),
+    );
+    router.post("/profile/complete", getCurrentMobileUser, (req, res) =>
+      this.completeProfile(req, res),
+    );
+    router.patch(
+      "/chat_group/:id/set-department",
+      getCurrentMobileUser,
+      (req, res) => this.setChatGroupDepartment(req, res),
+    );
+    router.put("/:prof_id", getCurrentMobileUser, (req, res) =>
+      this.updateProfile(req, res),
+    );
+    router.post("/client", getCurrentMobileUser, (req, res) =>
+      this.sendClientMessage(req, res),
+    );
 
     // Global error handler
     router.use((err, req, res, next) => {
       console.error("Unhandled error:", err);
-      res.status(500).json({ error: "Internal server error", details: String(err) });
+      res
+        .status(500)
+        .json({ error: "Internal server error", details: String(err) });
     });
 
     return router;
   }
-  /**
-   * Send OTP
-   */
-  async sendOtp(req, res) {
-    try {
-      const { phone_country_code, phone_number } = req.body;
-
-      if (!phone_country_code || !phone_number) {
-        return res.status(400).json({ error: "Phone number is required" });
-      }
-
-      // Check if OTP already exists and is verified
-      const { data: existingOtp } = await clientAccountService.checkExistingOtp(
-        phone_country_code,
-        phone_number
-      );
-
-      if (existingOtp) {
-        return res.status(409).json({
-          error: "An OTP has already been sent to this number. Please wait or use the existing OTP.",
-        });
-      }
-
-      // Generate and hash OTP
-      const otp = clientAccountService.generateOtp();
-      console.log(`🔐 Generated OTP for ${phone_country_code}${phone_number}: ${otp}`);
-      const otp_hash = await bcrypt.hash(otp, 10);
-      const expires_at = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-
-      // Upsert OTP
-      await clientAccountService.upsertOtp(phone_country_code, phone_number, otp_hash, expires_at);
-
-      // TODO: Replace with actual SMS sending
-
-      res.status(200).json({ message: "OTP sent successfully" });
-    } catch (err) {
-      console.error("Send OTP error:", err);
-      res.status(500).json({ error: "Failed to send OTP" });
-    }
-  }
 
   /**
-   * Verify OTP
+   * Validate Token
    */
-  async verifyOtp(req, res) {
+  async validateToken(req, res) {
     try {
-      const { phone_country_code, phone_number, otp } = req.body;
+      const clientId = req.userId; // From getCurrentMobileUser middleware
 
-      if (!phone_country_code || !phone_number || !otp) {
-        return res.status(400).json({ error: "Phone number and OTP are required" });
-      }
+      // Call service layer
+      const client = await clientAccountService.validateTokenFlow(clientId);
 
-      const otpData = await clientAccountService.getOtpData(phone_country_code, phone_number);
-
-      if (otpData.verified) {
-        return res.status(400).json({ error: "OTP already verified" });
-      }
-
-      if (new Date() > new Date(otpData.expires_at)) {
-        return res.status(400).json({ error: "OTP expired" });
-      }
-
-      const isValid = await bcrypt.compare(otp, otpData.otp_hash);
-
-      if (!isValid) {
-        await clientAccountService.incrementOtpAttempts(otpData.otp_id, otpData.attempts);
-        return res.status(400).json({ error: "Invalid OTP" });
-      }
-
-      // Mark OTP as verified
-      await clientAccountService.markOtpAsVerified(otpData.otp_id);
-
-      res.status(200).json({ message: "OTP verified successfully" });
+      res.json({
+        message: "Token is valid",
+        client,
+      });
     } catch (err) {
-      console.error("Verify OTP error:", err);
+      console.error("Validate token error:", err);
 
-      if (err.message === "OTP not found") {
+      if (err.message === "Client not found") {
         return res.status(404).json({ error: err.message });
       }
 
-      res.status(500).json({ error: "Failed to verify OTP" });
+      if (err.message === "Account is inactive") {
+        return res.status(403).json({ error: err.message });
+      }
+
+      res.status(500).json({ error: "Failed to validate token" });
     }
   }
 
   /**
-   * Complete registration
+   * Complete Profile
    */
-  async completeRegistration(req, res) {
+  async completeProfile(req, res) {
     try {
-      const { phone_country_code, phone_number, firstName, lastName, birthdate, address, password } =
-        req.body;
+      const clientId = req.userId; // From getCurrentMobileUser middleware
+      const { firstname, lastname } = req.body;
 
-      if (!phone_country_code || !phone_number || !firstName || !lastName || !birthdate || !password) {
-        return res.status(400).json({ error: "All fields are required" });
+      // Validate input
+      if (!firstname || !lastname) {
+        return res
+          .status(400)
+          .json({ error: "First name and last name are required" });
       }
 
-      // Check that OTP was verified
-      const otpData = await clientAccountService.getOtpData(phone_country_code, phone_number);
-
-      if (!otpData.verified) {
-        return res.status(400).json({ error: "OTP not verified yet" });
-      }
-
-      // Create profile
-      const profileData = await clientAccountService.createProfile(
-        firstName,
-        lastName,
-        birthdate,
-        address
+      // Call service layer
+      const result = await clientAccountService.completeProfileFlow(
+        clientId,
+        firstname,
+        lastname,
       );
 
-      // Hash password
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      // Create client
-      const clientData = await clientAccountService.createClient(
-        phone_country_code,
-        phone_number,
-        hashedPassword,
-        profileData.prof_id
-      );
-
-      // Delete OTP
-      await clientAccountService.deleteOtp(otpData.otp_id);
-
-      // Generate JWT token
-      const token = clientAccountService.generateToken(clientData.client_id, clientData.client_number);
-
-      res.status(200).json({
-        message: "Account created successfully",
-        client: {
-          ...clientData,
-          prof_id: profileData,
-        },
-        token,
+      res.json({
+        message: result.isUpdate
+          ? "Profile updated successfully"
+          : "Profile created successfully",
+        profile: result.profile,
       });
     } catch (err) {
-      console.error("Complete registration error:", err);
-      res.status(500).json({ error: err.message || "Failed to complete registration" });
-    }
-  }
+      console.error("Complete profile error:", err);
 
-  /**
-   * Login client
-   */
-  async loginClient(req, res) {
-    try {
-      const { client_country_code, client_number, client_password } = req.body;
-
-      if (!client_country_code || !client_number || !client_password) {
-        return res.status(400).json({ error: "All fields are required" });
+      if (err.message === "Client not found") {
+        return res.status(404).json({ error: err.message });
       }
 
-      // Get client
-      const client = await clientAccountService.getClientByPhone(client_country_code, client_number);
-
-      // Check password
-      const isMatch = await bcrypt.compare(client_password, client.client_password);
-
-      if (!isMatch) {
-        return res.status(401).json({ error: "Invalid phone number or password" });
-      }
-
-      // Generate JWT
-      const token = clientAccountService.generateToken(client.client_id, client.client_number);
-
-      // Get or create chat group
-      // const chatGroupId = await clientAccountService.getOrCreateChatGroup(client.client_id);
-
-      res.status(200).json({
-        message: "Login successful",
-        client,
-        token,
-        // chat_group_id: chatGroupId,
-        chat_group_name: `Client ${client.client_id} Chat`,
-      });
-    } catch (err) {
-      console.error("Login error:", err);
-      res.status(401).json({ error: err.message });
+      res.status(500).json({ error: "Failed to update profile" });
     }
   }
 
@@ -216,22 +112,20 @@ class ClientAccountController {
       const id = Number(req.params.id);
       const { dept_id } = req.body;
 
+      // Validate input
       if (!dept_id) {
         return res.status(400).json({ error: "Department ID is required" });
       }
 
-      // Update chat_group
-      const updatedGroup = await clientAccountService.updateChatGroupDepartment(id, dept_id);
-
-      // Get department name
-      const deptName = await clientAccountService.getDepartmentName(dept_id);
-
-      // Insert initial message
-      await clientAccountService.insertInitialMessage(id, deptName);
+      // Call service layer
+      const result = await clientAccountService.setChatGroupDepartmentFlow(
+        id,
+        dept_id,
+      );
 
       res.status(200).json({
         message: "Department assigned successfully and message created",
-        updated: updatedGroup,
+        updated: result.updatedGroup,
       });
     } catch (err) {
       console.error("Set department error:", err);
@@ -261,11 +155,8 @@ class ClientAccountController {
         prof_date_of_birth,
       } = req.body;
 
-      if (!prof_firstname || !prof_lastname) {
-        return res.status(400).json({ message: "First name and last name are required" });
-      }
-
-      const data = await clientAccountService.updateProfile(prof_id, {
+      // Call service layer
+      const profile = await clientAccountService.updateProfileFlow(prof_id, {
         prof_firstname,
         prof_middlename,
         prof_lastname,
@@ -278,10 +169,15 @@ class ClientAccountController {
 
       res.status(200).json({
         message: "Profile updated successfully",
-        profile: data,
+        profile,
       });
     } catch (err) {
       console.error("Update profile error:", err);
+
+      if (err.message === "First name and last name are required") {
+        return res.status(400).json({ error: err.message });
+      }
+
       res.status(500).json({ message: err.message || "Internal server error" });
     }
   }
@@ -293,15 +189,21 @@ class ClientAccountController {
     try {
       const { message, clientId, deptId } = req.body;
 
-      if (!message || !clientId) {
-        return res.status(400).json({ error: "Missing message or clientId" });
-      }
+      // Call service layer
+      const messageData = await clientAccountService.sendClientMessageFlow(
+        message,
+        clientId,
+        deptId,
+      );
 
-      const data = await clientAccountService.sendClientMessage(message, clientId, deptId);
-
-      res.json({ success: true, message: data });
+      res.json({ success: true, message: messageData });
     } catch (err) {
       console.error("❌ Error sending client message:", err);
+
+      if (err.message === "Missing message or clientId") {
+        return res.status(400).json({ error: err.message });
+      }
+
       res.status(500).json({ error: err.message });
     }
   }
