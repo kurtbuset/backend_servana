@@ -130,13 +130,29 @@ class SocketHandlers {
   /**
    * Handle typing events
    */
-  handleTyping(socket, data) {
-    const { chat_group_id, userName, userId } = data;
+  async handleTyping(socket, data) {
+    const { chatGroupId, userName, userId, userType } = data;
+    const roomId = String(chatGroupId);
+    
+    // Get user's profile image
+    let userImage = null;
+    if (socket.user && socket.user.profId) {
+      try {
+        const chatService = require('../services/chat.service');
+        const profileImages = await chatService.getProfileImages([socket.user.profId]);
+        userImage = profileImages[socket.user.profId] || null;
+      } catch (error) {
+        console.error('❌ Error getting profile image for typing:', error);
+      }
+    }
+    
     // Broadcast to all users in the chat group except sender
-    socket.to(chat_group_id).emit('userTyping', {
+    socket.to(roomId).emit('typing', {
+      chatGroupId,
       userName: userName || 'Someone',
       userId,
-      isCurrentUser: false,
+      userType: userType || socket.user?.userType || 'unknown',
+      userImage,
     });
   }
 
@@ -144,8 +160,14 @@ class SocketHandlers {
    * Handle stop typing events
    */
   handleStopTyping(socket, data) {
-    const { chat_group_id } = data;
-    socket.to(chat_group_id).emit('userStoppedTyping');
+    const { chatGroupId, userId, userType } = data;
+    const roomId = String(chatGroupId);
+    
+    socket.to(roomId).emit('stopTyping', {
+      chatGroupId,
+      userId,
+      userType: userType || socket.user?.userType || 'unknown',
+    });
   }
 
   /**

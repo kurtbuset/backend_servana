@@ -1,8 +1,5 @@
 const supabase = require("../../helpers/supabaseClient");
-const { v4: uuidv4 } = require("uuid");
 const jwtUtils = require("../../utils/jwt");
-
-const OTP_LENGTH = 6;
 
 class ClientAccountService {
   /**
@@ -23,15 +20,6 @@ class ClientAccountService {
   }
 
   /**
-   * Generate OTP
-   */
-  generateOtp(length = OTP_LENGTH) {
-    let otp = "";
-    for (let i = 0; i < length; i++) otp += Math.floor(Math.random() * 10);
-    return otp;
-  }
-
-  /**
    * Check if OTP already exists and is verified
    * Also checks rate limiting (3 requests per hour)
    */
@@ -45,101 +33,6 @@ class ClientAccountService {
       .single();
 
     return { data, error };
-  }
-
-  /**
-   * Check rate limiting for OTP requests
-   * Returns the count of OTP requests in the last hour
-   */
-  async checkRateLimit(phoneCountryCode, phoneNumber) {
-    const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
-
-    const { data, error } = await supabase
-      .from("otp_sms")
-      .select("created_at")
-      .eq("phone_country_code", phoneCountryCode)
-      .eq("phone_number", phoneNumber)
-      .gte("created_at", oneHourAgo);
-
-    if (error) {
-      throw new Error("Failed to check rate limit");
-    }
-
-    return data ? data.length : 0;
-  }
-
-  /**
-   * Upsert OTP
-   * @param {string} phoneCountryCode - Phone country code
-   * @param {string} phoneNumber - Phone number
-   * @param {string} otpHash - Hashed OTP
-   * @param {string} expiresAt - Expiration timestamp
-   * @param {string} otpType - Type of OTP ('registration' or 'login')
-   * @param {number|null} clientId - Client ID (for login OTPs)
-   */
-  async upsertOtp(
-    phoneCountryCode,
-    phoneNumber,
-    otpHash,
-    expiresAt,
-    otpType = "registration",
-    clientId = null,
-  ) {
-    const { error } = await supabase.from("otp_sms").upsert(
-      {
-        otp_id: uuidv4(),
-        phone_country_code: phoneCountryCode,
-        phone_number: phoneNumber,
-        otp_hash: otpHash,
-        expires_at: expiresAt,
-        otp_type: otpType,
-        client_id: clientId,
-        verified: false,
-        attempts: 0,
-      },
-      { onConflict: ["phone_number"] },
-    );
-
-    if (error) throw error;
-  }
-
-  /**
-   * Get OTP data
-   * Returns all OTP fields including otp_type and client_id
-   */
-  async getOtpData(phoneCountryCode, phoneNumber) {
-    const { data, error } = await supabase
-      .from("otp_sms")
-      .select("*")
-      .eq("phone_country_code", phoneCountryCode)
-      .eq("phone_number", phoneNumber)
-      .single();
-
-    if (error || !data) {
-      throw new Error("OTP not found");
-    }
-
-    return data;
-  }
-
-  /**
-   * Increment OTP attempts
-   */
-  async incrementOtpAttempts(otpId, currentAttempts) {
-    await supabase
-      .from("otp_sms")
-      .update({ attempts: currentAttempts + 1 })
-      .eq("otp_id", otpId);
-  }
-
-  /**
-   * Mark OTP as verified
-   */
-  async markOtpAsVerified(otpId) {
-    await supabase
-      .from("otp_sms")
-      .update({ verified: true })
-      .eq("otp_id", otpId);
   }
 
   /**
@@ -227,13 +120,174 @@ class ClientAccountService {
   }
 
   /**
-   * Delete OTP
+   * Create client without password (for passwordless auth)
    */
-  async deleteOtp(otpId) {
-    await supabase
-      .from("otp_sms")
-      .delete()
-      .eq("otp_id", otpId);
+  async createClientWithoutPassword(phoneCountryCode, phoneNumber) {
+    const clientRoleId = await this.getClientRoleId();
+
+    const { data, error } = await supabase
+      .from("client")
+      .insert({
+        client_country_code: phoneCountryCode,
+        client_number: phoneNumber,
+        prof_id: null, // No profile yet
+        client_updated_at: new Date().toISOString(),
+        client_is_active: true,
+        role_id: clientRoleId,
+      })
+      .select(
+        `
+        *,
+        prof_id (
+          prof_id,
+          prof_firstname,
+          prof_middlename,
+          prof_lastname,
+          prof_address,
+          prof_date_of_birth,
+          prof_street_address,
+          prof_region_info,
+          prof_postal_code
+        )
+      `,
+      )
+      .single();
+
+    if (error || !data) {
+      throw new Error("Failed to create client");
+    }
+
+    return data;
+  }
+
+  /**
+   * VALIDATE TOKEN - Main business logic
+   * Validates JWT and checks if client exists and is active
+   */
+  async validateTokenFlow(clientId) {
+    // Check if client exists and is active
+    const { data: client, error: clientError } = await supabase
+      .from("client")
+      .select(
+        `
+        client_id,
+        client_country_code,
+        client_number,
+        client_is_active,
+        prof_id (
+          prof_id,
+          prof_firstname,
+          prof_lastname,
+          prof_middlename
+        )
+      `,
+      )
+      .eq("client_id", clientId)
+      .single();
+
+    if (clientError || !client) {
+      throw new Error("Client not found");
+    }
+
+    if (!client.client_is_active) {
+      throw new Error("Account is inactive");
+    }
+
+    return client;
+  }
+
+  /**
+   * COMPLETE PROFILE - Main business logic
+   * Creates or updates client profile
+   */
+  async completeProfileFlow(clientId, firstname, lastname) {
+    // 1. Get client
+    const { data: client, error: clientError } = await supabase
+      .from("client")
+      .select("prof_id")
+      .eq("client_id", clientId)
+      .single();
+
+    if (clientError || !client) {
+      throw new Error("Client not found");
+    }
+
+    // 2. Create or update profile
+    let profile;
+    let isUpdate = false;
+
+    if (client.prof_id) {
+      // Update existing profile
+      profile = await this.updateProfile(client.prof_id, {
+        prof_firstname: firstname,
+        prof_lastname: lastname,
+      });
+      isUpdate = true;
+    } else {
+      // Create new profile
+      profile = await this.createProfileMinimal(firstname, lastname);
+
+      // Link profile to client
+      await this.linkProfileToClient(clientId, profile.prof_id);
+    }
+
+    return {
+      profile,
+      isUpdate,
+    };
+  }
+
+  /**
+   * SET CHAT GROUP DEPARTMENT - Main business logic
+   * Assigns department to chat group and creates initial message
+   */
+  async setChatGroupDepartmentFlow(chatGroupId, deptId) {
+    // 1. Update chat group
+    const updatedGroup = await this.updateChatGroupDepartment(
+      chatGroupId,
+      deptId,
+    );
+
+    // 2. Get department name
+    const deptName = await this.getDepartmentName(deptId);
+
+    // 3. Insert initial message
+    await this.insertInitialMessage(chatGroupId, deptName);
+
+    return {
+      updatedGroup,
+      deptName,
+    };
+  }
+
+  /**
+   * UPDATE PROFILE - Main business logic
+   * Updates client profile with validation
+   */
+  async updateProfileFlow(profId, profileData) {
+    // Validate required fields (only firstname is required)
+    if (!profileData.prof_firstname) {
+      throw new Error("First name is required");
+    }
+
+    // Update profile
+    const profile = await this.updateProfile(profId, profileData);
+
+    return profile;
+  }
+
+  /**
+   * SEND CLIENT MESSAGE - Main business logic
+   * Sends message from client with chat group management
+   */
+  async sendClientMessageFlow(message, clientId, deptId) {
+    if (!message || !clientId) {
+      throw new Error("Missing message or clientId");
+    }
+
+    const messageData = await this.sendClientMessage(message, clientId, deptId);
+
+    return messageData;
   }
 
   /**

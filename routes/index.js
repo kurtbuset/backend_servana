@@ -10,6 +10,7 @@ const queueController = require('../controllers/queue.controller');
 const roleController = require('../controllers/role.controller');
 const agentController = require('../controllers/agent.controller');
 const clientAccountController = require('../controllers/mobile/clientAccount.controller');
+const otpController = require('../controllers/mobile/otp.controller');
 const mobileDepartmentController = require('../controllers/mobile/department.controller');
 const mobileMessageController = require('../controllers/mobile/message.controller');
 const roleService = require('../services/role.service');
@@ -49,6 +50,7 @@ async function setupRoutes(app) {
   app.use('/macros', macroController.getRouter());
   
   // Mobile routes
+  app.use('/otp', otpController.getRouter());
   app.use('/clientAccount', clientAccountController.getRouter());
   app.use('/department', mobileDepartmentController.getRouter());
   app.use('/messages', mobileMessageController.getRouter());
