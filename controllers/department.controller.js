@@ -40,6 +40,11 @@ class DepartmentController {
       (req, res) => this.getDepartmentMembers(req, res)
     );
 
+    // View department members - any authenticated user can view (for department panel)
+    router.get("/:id/view-members", 
+      (req, res) => this.viewDepartmentMembers(req, res)
+    );
+
     return router;
   }
   /**
@@ -132,6 +137,23 @@ class DepartmentController {
     } catch (err) {
       console.error("Error fetching department members:", err.message);
       res.status(500).json({ error: "Failed to fetch department members" });
+    }
+  }
+
+  /**
+   * View department members - public endpoint for any authenticated user
+   * Used by department panel to show team members
+   */
+  async viewDepartmentMembers(req, res) {
+    try {
+      const { id } = req.params;
+
+      const members = await departmentService.getDepartmentMembers(id);
+
+      res.status(200).json({ members });
+    } catch (err) {
+      console.error("Error viewing department members:", err.message);
+      res.status(500).json({ error: "Failed to view department members" });
     }
   }
 }

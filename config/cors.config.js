@@ -1,7 +1,10 @@
 const allowedOrigins = [
   process.env.REACT_WEB_URL || 'http://localhost:5173',
   process.env.REACT_WEB_PRODUCTION_URL,
-  'http://localhost:5173'
+  'http://localhost:5173',
+  'http://localhost:8081', // Expo dev server
+  'http://localhost:19006', // Expo web
+  'exp://localhost:8081', // Expo mobile
 ].filter(Boolean);
 
 const getCorsConfig = () => ({

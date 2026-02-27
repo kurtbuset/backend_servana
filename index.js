@@ -68,7 +68,8 @@ async function startServer() {
       console.log(`🚀 Server running on port ${port}`);
       console.log(`🌐 Server accessible at:`);
       console.log(`   - Local: http://localhost:${port}`);
-      console.log(`   - Network: http://192.168.137.53:${port}`);
+      console.log(`   - Network (Wi-Fi): http://192.168.137.77:${port}`);
+      console.log(`   - Network (LAN): http://10.120.60.81:${port}`);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);
