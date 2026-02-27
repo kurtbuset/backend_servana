@@ -34,9 +34,8 @@ class DepartmentController {
       (req, res) => this.toggleDepartmentStatus(req, res)
     );
 
-    // Get members of a department - requires department management permission
+    // Get members of a department - public api endpoint
     router.get("/:id/members", 
-      checkPermission(PERMISSIONS.MANAGE_DEPT),
       (req, res) => this.getDepartmentMembers(req, res)
     );
 
