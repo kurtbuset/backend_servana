@@ -83,6 +83,35 @@ class AuthController {
         });
       }
 
+      // Set agent_status to accepting_chats on login
+      try {
+        await authService.updateAgentStatus(sysUser.sys_user_id, 'accepting_chats');
+        console.log(`✅ Set agent_status to accepting_chats for user: ${sysUser.sys_user_id}`);
+        
+        // Assign queued chats to newly logged in agent
+        const agentAssignmentService = require('../services/agentAssignment.service');
+        agentAssignmentService.assignQueuedChatsToAgent(sysUser.sys_user_id)
+          .then(assignedChats => {
+            if (assignedChats.length > 0) {
+              console.log(`✅ Assigned ${assignedChats.length} queued chats to newly logged in agent ${sysUser.sys_user_id}`);
+              
+              // Broadcast assignments via Socket.IO notifier
+              const io = req.app.get('io');
+              if (io && io.socketConfig) {
+                const notifier = io.socketConfig.getChatGroupNotifier();
+                if (notifier) {
+                  notifier.notifyQueuedChatsAssigned(assignedChats, sysUser.sys_user_id);
+                }
+              }
+            }
+          })
+          .catch(err => {
+            console.error('❌ Error assigning queued chats on login:', err.message);
+          });
+      } catch (statusErr) {
+        console.error('⚠️ Error updating agent_status:', statusErr.message);
+      }
+
       res.json({
         message: "Login successful",
         user: { sys_user_id: sysUser.sys_user_id, role_id: sysUser.role_id },
@@ -187,6 +216,27 @@ class AuthController {
     try {
       const sessionId = req.cookies.session_id;
       const cache = req.app.get('cache');
+      const token = req.cookies.access_token;
+
+      // Get user ID to update agent_status
+      let userId = null;
+      if (token) {
+        try {
+          userId = await authService.getSystemUserIdFromToken(token);
+        } catch (err) {
+          console.error('⚠️ Failed to get user ID from token:', err.message);
+        }
+      }
+
+      // Set agent_status to offline on logout
+      if (userId) {
+        try {
+          await authService.updateAgentStatus(userId, 'offline');
+          console.log(`✅ Set agent_status to offline for user: ${userId}`);
+        } catch (statusErr) {
+          console.error('⚠️ Error updating agent_status on logout:', statusErr.message);
+        }
+      }
 
       // Delete session if it exists
       if (cache && sessionId) {

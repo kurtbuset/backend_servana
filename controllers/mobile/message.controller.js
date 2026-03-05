@@ -92,9 +92,18 @@ class MobileMessageController {
         return res.status(400).json({ error: "Missing required fields" });
       }
 
-      const chatGroupId = await mobileMessageService.createChatGroup(department, clientId);
+      const result = await mobileMessageService.createChatGroup(department, clientId);
 
-      res.status(201).json({ chat_group_id: chatGroupId });
+      // Emit socket notifications
+      const io = req.app.get('io');
+      if (io && io.socketConfig) {
+        const notifier = io.socketConfig.getChatGroupNotifier();
+        if (notifier) {
+          notifier.notifyChatGroupCreated(result, result.department, clientId);
+        }
+      }
+
+      res.status(201).json(result);
     } catch (err) {
       console.error("Error creating chat group:", err.message);
       res.status(500).json({ error: "Failed to create chat group" });

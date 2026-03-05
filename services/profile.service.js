@@ -9,7 +9,7 @@ class ProfileService {
     // Fetch system_user with role_name from role table
     const { data: userRow, error: userErr } = await supabase
       .from("sys_user")
-      .select("sys_user_id, sys_user_email, prof_id, role_id, role:role_id(role_name)")
+      .select("sys_user_id, sys_user_email, prof_id, role_id, agent_status, role:role_id(role_name)")
       .eq("sys_user_id", sysUserId)
       .single();
 
@@ -486,6 +486,49 @@ class ProfileService {
       console.error('❌ Error in backfillMissingProfiles:', error.message);
       throw error;
     }
+  }
+
+  /**
+   * Get agent status
+   */
+  async getAgentStatus(sysUserId) {
+    try {
+      const { data: userRow, error: userErr } = await supabase
+        .from("sys_user")
+        .select("agent_status")
+        .eq("sys_user_id", sysUserId)
+        .single();
+
+      if (userErr || !userRow) {
+        throw new Error("User not found");
+      }
+
+      return userRow.agent_status || 'offline';
+    } catch (error) {
+      console.error(`❌ Error getting agent status for user ${sysUserId}:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Update agent status
+   */
+  async updateAgentStatus(sysUserId, status) {
+    const validStatuses = ['accepting_chats', 'not_accepting_chats', 'offline'];
+    
+    if (!validStatuses.includes(status)) {
+      throw new Error(`Invalid agent status: ${status}`);
+    }
+
+    const { error } = await supabase
+      .from("sys_user")
+      .update({ 
+        agent_status: status,
+        sys_user_updated_at: new Date().toISOString()
+      })
+      .eq("sys_user_id", sysUserId);
+
+    if (error) throw error;
   }
 }
 

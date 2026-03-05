@@ -20,7 +20,6 @@ class MessageAuth {
       this.validateMessageData(messageData);
       
       // 2. Check room access permissions
-      console.log('phone number: ', userContext.phoneNumber)
       const roomAccess = await this.roomAccess.canSendMessage(userContext, messageData.chat_group_id);
       if (!roomAccess.allowed) {
         throw new Error(roomAccess.reason);
