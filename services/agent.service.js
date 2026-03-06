@@ -67,7 +67,7 @@ class AgentService {
       if (!users || users.length === 0) {
         // Cache empty result to avoid repeated database queries
         await cacheService.updateAgents([]);
-        console.log('✅ Cached empty agents result with 2-hour TTL');
+        // console.log('✅ Cached empty agents result with 2-hour TTL');
         return [];
       }
 
@@ -127,7 +127,7 @@ class AgentService {
 
       // Cache the result for future requests with 2-hour TTL
       await cacheService.updateAgents(formattedAgents);
-      console.log(`✅ Cached ${formattedAgents.length} agents with 2-hour TTL using write-through strategy`);
+      // console.log(`✅ Cached ${formattedAgents.length} agents with 2-hour TTL using write-through strategy`);
 
       return formattedAgents;
     } catch (error) {

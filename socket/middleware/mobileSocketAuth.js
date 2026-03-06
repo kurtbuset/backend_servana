@@ -210,19 +210,22 @@ class MobileSocketAuth {
 
       const now = Date.now();
       const timeUntilExpiry = expiration - now;
-      const oneHour = 60 * 60 * 1000;
+      const threeMinutes = 3 * 60 * 1000;
 
-      // Refresh if token expires in less than 1 hour
-      if (timeUntilExpiry < oneHour) {
+      // Refresh if token expires in less than 3 minutes
+      if (timeUntilExpiry < threeMinutes && timeUntilExpiry > 0) {
         const newToken = this.generateToken(clientId);
+        const newExpiration = this.authUtils.getTokenExpiration(newToken);
+        
         return {
           access_token: newToken,
-          expires_at: this.authUtils.getTokenExpiration(newToken)
+          expires_at: newExpiration
         };
       }
 
       return null; // No refresh needed
     } catch (error) {
+      console.error('Token refresh check failed:', error.message);
       return null;
     }
   }

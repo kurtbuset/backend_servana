@@ -1,5 +1,6 @@
 const express = require("express");
 const authService = require("../services/auth.service");
+const agentStatusService = require("../services/agentStatus.service");
 const sessionService = require("../services/session.service");
 
 class AuthController {
@@ -8,6 +9,9 @@ class AuthController {
 
     // Login
     router.post("/login", (req, res) => this.login(req, res));
+
+    // Refresh token
+    router.post("/refresh", (req, res) => this.refreshToken(req, res));
 
     // Check authentication
     router.get("/me", (req, res) => this.checkAuth(req, res));
@@ -83,34 +87,8 @@ class AuthController {
         });
       }
 
-      // Set agent_status to accepting_chats on login
-      try {
-        await authService.updateAgentStatus(sysUser.sys_user_id, 'accepting_chats');
-        console.log(`✅ Set agent_status to accepting_chats for user: ${sysUser.sys_user_id}`);
-        
-        // Assign queued chats to newly logged in agent
-        const agentAssignmentService = require('../services/agentAssignment.service');
-        agentAssignmentService.assignQueuedChatsToAgent(sysUser.sys_user_id)
-          .then(assignedChats => {
-            if (assignedChats.length > 0) {
-              console.log(`✅ Assigned ${assignedChats.length} queued chats to newly logged in agent ${sysUser.sys_user_id}`);
-              
-              // Broadcast assignments via Socket.IO notifier
-              const io = req.app.get('io');
-              if (io && io.socketConfig) {
-                const notifier = io.socketConfig.getChatGroupNotifier();
-                if (notifier) {
-                  notifier.notifyQueuedChatsAssigned(assignedChats, sysUser.sys_user_id);
-                }
-              }
-            }
-          })
-          .catch(err => {
-            console.error('❌ Error assigning queued chats on login:', err.message);
-          });
-      } catch (statusErr) {
-        console.error('⚠️ Error updating agent_status:', statusErr.message);
-      }
+      // Note: agent_status is now handled via Socket.IO events (agentOnline)
+      // The socket connection will automatically set the agent status
 
       res.json({
         message: "Login successful",
@@ -125,6 +103,68 @@ class AuthController {
       }
 
       res.status(401).json({ error: err.message });
+    }
+  }
+
+  /**
+   * Refresh access token using refresh token
+   */
+  async refreshToken(req, res) {
+    try {
+      const refreshToken = req.cookies.refresh_token || req.body.refresh_token;
+
+      if (!refreshToken) {
+        return res.status(401).json({ error: "No refresh token provided" });
+      }
+
+      // Refresh session with Supabase
+      const { session, user } = await authService.refreshSession(refreshToken);
+
+      if (!session || !user) {
+        return res.status(401).json({ error: "Token refresh failed" });
+      }
+
+      // Update cookies with new tokens
+      res.cookie("access_token", session.access_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+        maxAge: 24 * 60 * 60 * 1000, // 1 day
+      });
+
+      res.cookie("refresh_token", session.refresh_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      });
+
+      // Update session in cache if exists
+      const sessionId = req.cookies.session_id;
+      const cache = req.app.get('cache');
+      
+      if (cache && sessionId) {
+        try {
+          await sessionService.touchSession(cache, sessionId);
+          console.log(`🔄 Refreshed session: ${sessionId}`);
+        } catch (error) {
+          console.error('⚠️ Failed to update session:', error.message);
+        }
+      }
+
+      res.json({
+        message: "Token refreshed successfully",
+        access_token: session.access_token,
+        expires_at: session.expires_at
+      });
+    } catch (err) {
+      console.error("Token refresh error:", err.message);
+      
+      // Clear invalid tokens
+      res.clearCookie("access_token");
+      res.clearCookie("refresh_token");
+      
+      res.status(401).json({ error: "Token refresh failed: " + err.message });
     }
   }
 
@@ -228,15 +268,8 @@ class AuthController {
         }
       }
 
-      // Set agent_status to offline on logout
-      if (userId) {
-        try {
-          await authService.updateAgentStatus(userId, 'offline');
-          console.log(`✅ Set agent_status to offline for user: ${userId}`);
-        } catch (statusErr) {
-          console.error('⚠️ Error updating agent_status on logout:', statusErr.message);
-        }
-      }
+      // Note: agent_status offline is now handled via Socket.IO events (agentOffline/disconnect)
+      // The socket disconnection will automatically set the agent status to offline
 
       // Delete session if it exists
       if (cache && sessionId) {

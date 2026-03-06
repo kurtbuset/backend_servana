@@ -145,12 +145,30 @@ class SocketAuthMiddleware {
   }
 
   /**
-   * Schedule periodic token validation
+   * Schedule periodic token validation with proactive refresh
    */
   scheduleTokenValidation(socket) {
     // Validate token every 5 minutes
     const validationInterval = setInterval(async () => {
       try {
+        // Check if token is close to expiry (within 3 minutes)
+        const shouldRefresh = await this.shouldRefreshToken(socket);
+        
+        if (shouldRefresh) {
+          console.log(`🔄 Token expiring soon for socket ${socket.id}, attempting refresh...`);
+          const refreshed = await this.attemptTokenRefresh(socket);
+          
+          if (refreshed) {
+            console.log(`✅ Token refreshed successfully for socket ${socket.id}`);
+            socket.emit('token_refreshed', { 
+              message: 'Your session has been automatically renewed',
+              expires_at: refreshed.expires_at
+            });
+            return; // Skip validation since we just refreshed
+          }
+        }
+        
+        // Validate current token
         if (socket.clientType === 'web') {
           await this.webAuth.validateToken(socket.user.token);
         } else if (socket.clientType === 'mobile') {
@@ -158,12 +176,106 @@ class SocketAuthMiddleware {
         }
       } catch (error) {
         console.error(`Token validation failed for socket ${socket.id}:`, error.message);
-        socket.emit('session_expired', { reason: 'Token validation failed' });
+        
+        // Check if token is within grace period (2 minutes after expiry)
+        const isWithinGracePeriod = this.isWithinGracePeriod(socket.user.token);
+        
+        if (isWithinGracePeriod) {
+          console.log(`⏰ Token expired but within grace period for socket ${socket.id}`);
+          socket.emit('token_expiring', { 
+            message: 'Your session is expiring. Please refresh to continue.',
+            grace_period_seconds: 120
+          });
+          return; // Don't disconnect yet
+        }
+        
+        // Grace period expired, disconnect
+        socket.emit('session_expired', { 
+          reason: 'Token validation failed',
+          message: 'Your session has expired. Please log in again.'
+        });
         socket.disconnect(true);
       }
     }, 5 * 60 * 1000); // 5 minutes
     
     socket.tokenValidationInterval = validationInterval;
+  }
+
+  /**
+   * Check if token should be refreshed (within 3 minutes of expiry)
+   */
+  async shouldRefreshToken(socket) {
+    try {
+      const token = socket.user.token;
+      const payload = this.authUtils.extractJWTPayload(token);
+      
+      if (!payload.exp) {
+        return false; // No expiration, can't determine
+      }
+      
+      const now = Math.floor(Date.now() / 1000);
+      const timeUntilExpiry = payload.exp - now;
+      const threeMinutes = 3 * 60;
+      
+      return timeUntilExpiry > 0 && timeUntilExpiry < threeMinutes;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Check if token is within grace period (2 minutes after expiry)
+   */
+  isWithinGracePeriod(token) {
+    try {
+      const payload = this.authUtils.extractJWTPayload(token);
+      
+      if (!payload.exp) {
+        return false;
+      }
+      
+      const now = Math.floor(Date.now() / 1000);
+      const timeSinceExpiry = now - payload.exp;
+      const twoMinutes = 2 * 60;
+      
+      // Within grace period if expired less than 2 minutes ago
+      return timeSinceExpiry > 0 && timeSinceExpiry < twoMinutes;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Attempt to refresh token automatically
+   */
+  async attemptTokenRefresh(socket) {
+    try {
+      if (socket.clientType === 'web') {
+        const refreshed = await this.webAuth.refreshTokenIfNeeded(socket);
+        if (refreshed) {
+          // Update socket user context with new token
+          socket.user.token = refreshed.access_token;
+          return refreshed;
+        }
+      } else if (socket.clientType === 'mobile') {
+        const refreshed = await this.mobileAuth.refreshTokenIfNeeded(socket.user.token, socket.user.userId);
+        if (refreshed) {
+          // Update socket user context with new token
+          socket.user.token = refreshed.access_token;
+          // Emit new token to mobile client
+          socket.emit('new_token', {
+            access_token: refreshed.access_token,
+            expires_at: refreshed.expires_at
+          });
+          return refreshed;
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.error(`Token refresh failed for socket ${socket.id}:`, error.message);
+      return null;
+    }
   }
 
   /**

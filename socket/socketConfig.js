@@ -1,6 +1,6 @@
 const socketIo = require('socket.io');
 const SocketAuthMiddleware = require('./middleware/socketAuth');
-const UserStatusManager = require('./userStatusManager');
+const AgentStatusManager = require('./agentStatusManager');
 const RoomManagementService = require('./services/roomManagementService');
 const { ChatGroupNotifier } = require('./notifications');
 
@@ -9,14 +9,12 @@ const {
   ChatRoomHandler,
   TypingHandler,
   MessageHandler,
-  UserStatusHandler,
   AgentStatusHandler
 } = require('./handlers');
 
 // Import events
 const {
   ChatEvents,
-  UserStatusEvents,
   AgentStatusEvents
 } = require('./events');
 
@@ -42,8 +40,9 @@ class SocketConfig {
     this.userStatusEvents = null;
     this.agentStatusEvents = null;
     
-    // Manager
+    // Managers
     this.userStatusManager = null;
+    this.agentStatusManager = null;
     
     // Notifiers
     this.chatGroupNotifier = null;
@@ -57,7 +56,11 @@ class SocketConfig {
       cors: {
         origin: this.allowedOrigins,
         credentials: true,
-      }
+      },
+      // Mobile-optimized ping/pong settings
+      pingInterval: 25000, // Send ping every 25 seconds (default)
+      pingTimeout: 60000,  // Wait 60 seconds for pong (increased for mobile)
+      // Total disconnect time: ~85 seconds (better for mobile backgrounding)
     });
 
     // Store reference to config on io instance for access from controllers
@@ -72,7 +75,7 @@ class SocketConfig {
     this.chatRoomHandler = new ChatRoomHandler(this.io);
     this.typingHandler = new TypingHandler(this.io);
     this.messageHandler = new MessageHandler(this.io);
-    this.userStatusHandler = new UserStatusHandler(this.io);
+    
     this.agentStatusHandler = new AgentStatusHandler(this.io);
     
     // Initialize events
@@ -81,17 +84,17 @@ class SocketConfig {
       this.typingHandler,
       this.messageHandler
     );
-    this.userStatusEvents = new UserStatusEvents(this.userStatusHandler);
+    
     this.agentStatusEvents = new AgentStatusEvents(this.agentStatusHandler);
     
-    // Initialize manager
-    this.userStatusManager = new UserStatusManager(this.io, this.userStatusHandler);
+    // Initialize managers
+    this.agentStatusManager = new AgentStatusManager(this.io, this.agentStatusHandler);
     
     // Initialize notifiers
     this.chatGroupNotifier = new ChatGroupNotifier(this.io);
     
     this.setupEventListeners();
-    this.userStatusManager.start();
+    this.agentStatusManager.start();
     
     return this.io;
   }
@@ -102,9 +105,6 @@ class SocketConfig {
   setupEventListeners() {
     this.io.on('connection', (socket) => {
       console.log(`🔌 New socket connection: ${socket.id}`);
-
-      // Register user status events
-      this.userStatusEvents.register(socket);
       
       // Register agent status events
       this.agentStatusEvents.register(socket);
@@ -114,17 +114,22 @@ class SocketConfig {
 
       // Handle user coming online - join department rooms for agents
       socket.on('userOnline', async (data) => {
-        await this.userStatusHandler.handleUserOnline(socket, data);
-        
         // Join department rooms for agents
         if (socket.user && socket.user.userType === 'agent') {
           await RoomManagementService.joinDepartmentRooms(socket);
+          
+          // Also handle agent online status
+          await this.agentStatusHandler.handleAgentOnline(socket, data);
         }
       });
 
       // Disconnection
       socket.on('disconnect', async () => {
-        await this.userStatusHandler.handleUserDisconnect(socket);
+        // Handle agent disconnect (don't set offline, just update last_seen)
+        if (socket.user && socket.user.userType === 'agent') {
+          await this.agentStatusHandler.handleAgentDisconnect(socket);
+        }
+        
         this.chatRoomHandler.handleDisconnect(socket);
       });
     });
@@ -154,6 +159,20 @@ class SocketConfig {
   }
 
   /**
+   * Get agent status handler
+   */
+  getAgentStatusHandler() {
+    return this.agentStatusHandler;
+  }
+
+  /**
+   * Get agent status manager
+   */
+  getAgentStatusManager() {
+    return this.agentStatusManager;
+  }
+
+  /**
    * Get chat group notifier
    */
   getChatGroupNotifier() {
@@ -166,6 +185,9 @@ class SocketConfig {
   cleanup() {
     if (this.userStatusManager) {
       this.userStatusManager.stop();
+    }
+    if (this.agentStatusManager) {
+      this.agentStatusManager.stop();
     }
   }
 }
