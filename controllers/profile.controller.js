@@ -3,7 +3,7 @@ const multer = require("multer");
 const profileService = require("../services/profile.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
 const { checkPermission } = require("../middleware/checkPermission");
-const { PERMISSIONS } = require("../constants/permissions")
+const { PERMISSIONS } = require("../constants/permissions");
 
 class ProfileController {
   getRouter() {
@@ -21,6 +21,12 @@ class ProfileController {
 
     // Upload profile image
     router.post("/image", checkPermission(PERMISSIONS.MANAGE_PROFILE), upload.single("image"), (req, res) => this.uploadProfileImage(req, res));
+
+    // Get agent status
+    router.get("/agent-status", (req, res) => this.getAgentStatus(req, res));
+
+    // Update agent status
+    router.put("/agent-status", (req, res) => this.updateAgentStatus(req, res));
 
     return router;
   }
@@ -200,6 +206,93 @@ class ProfileController {
       }
       
       res.status(500).json({ error: "Server error uploading image" });
+    }
+  }
+
+  /**
+   * Get agent status
+   */
+  async getAgentStatus(req, res) {
+    try {
+      const sysUserId = req.userId;
+
+      const agentStatus = await profileService.getAgentStatus(sysUserId);
+
+      res.json({ 
+        agent_status: agentStatus 
+      });
+    } catch (err) {
+      console.error("Error fetching agent status:", err.message);
+      
+      if (err.message === "User not found") {
+        return res.status(404).json({ error: err.message });
+      }
+      
+      res.status(500).json({ error: "Server error fetching agent status" });
+    }
+  }
+
+  /**
+   * Update agent status
+   */
+  async updateAgentStatus(req, res) {
+    try {
+      const sysUserId = req.userId;
+      const { agent_status } = req.body;
+
+      const validStatuses = ['accepting_chats', 'not_accepting_chats', 'offline'];
+      
+      if (!agent_status || !validStatuses.includes(agent_status)) {
+        return res.status(400).json({ 
+          error: "Invalid agent_status. Must be one of: accepting_chats, not_accepting_chats, offline" 
+        });
+      }
+
+      // Update agent status in database
+      await profileService.updateAgentStatus(sysUserId, agent_status);
+
+      // Emit socket event for real-time update
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('agentStatusChanged', {
+          userId: sysUserId,
+          agent_status,
+          timestamp: new Date()
+        });
+        console.log(`📡 Broadcasted agent status change: ${sysUserId} -> ${agent_status}`);
+      }
+
+      // If agent is now accepting chats, assign queued chats
+      if (agent_status === 'accepting_chats') {
+        const agentAssignmentService = require('../services/agentAssignment.service');
+        
+        // Run assignment in background
+        agentAssignmentService.assignQueuedChatsToAgent(sysUserId)
+          .then(assignedChats => {
+            if (assignedChats.length > 0) {
+              console.log(`✅ Assigned ${assignedChats.length} queued chats to agent ${sysUserId}`);
+              
+              // Broadcast assignments via Socket.IO notifier
+              if (io && io.socketConfig) {
+                const notifier = io.socketConfig.getChatGroupNotifier();
+                if (notifier) {
+                  notifier.notifyQueuedChatsAssigned(assignedChats, sysUserId);
+                }
+              }
+            }
+          })
+          .catch(err => {
+            console.error('❌ Error assigning queued chats:', err.message);
+          });
+      }
+
+      res.json({ 
+        message: "Agent status updated successfully",
+        agent_status 
+      });
+    } catch (err) {
+      console.error("Error updating agent status:", err.message);
+      res.status(500).json({ error: "Server error updating agent status" });
     }
   }
 }

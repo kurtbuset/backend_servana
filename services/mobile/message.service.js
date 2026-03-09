@@ -1,4 +1,5 @@
 const supabase = require("../../helpers/supabaseClient");
+const agentAssignmentService = require("../agentAssignment.service");
 
 class MobileMessageService {
   /**
@@ -77,7 +78,7 @@ class MobileMessageService {
   }
 
   /**
-   * Create a new chat group
+   * Create a new chat group with auto-assignment
    */
   async createChatGroup(department, clientId) {
     const { data, error } = await supabase
@@ -86,14 +87,43 @@ class MobileMessageService {
         {
           dept_id: department,
           client_id: clientId,
-          status: "queued",
+          status: "queued", // Initially queued
         },
       ])
       .select()
       .single();
 
     if (error) throw error;
-    return data.chat_group_id;
+
+    const chatGroupId = data.chat_group_id;
+
+    // Auto-assign to available agent or keep queued
+    try {
+      const assignmentResult = await agentAssignmentService.autoAssignChatGroup(
+        chatGroupId,
+        department
+      );
+
+      console.log(`📋 Chat group ${chatGroupId} assignment result:`, assignmentResult);
+
+      return {
+        chat_group_id: chatGroupId,
+        assigned: assignmentResult.assigned,
+        status: assignmentResult.status,
+        agent_id: assignmentResult.agentId || null,
+        department
+      };
+    } catch (assignError) {
+      console.error("❌ Error auto-assigning chat group:", assignError.message);
+      // Return chat group ID even if assignment fails
+      return {
+        chat_group_id: chatGroupId,
+        assigned: false,
+        status: "queued",
+        agent_id: null,
+        department
+      };
+    }
   }
 }
 
