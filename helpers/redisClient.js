@@ -59,10 +59,10 @@ class RedisCacheManager {
       const port = process.env.REDIS_PORT || 6379;
       const password = process.env.REDIS_PASSWORD || undefined;
 
-      console.log('🔧 Redis configuration:');
-      console.log('   Host:', host, process.env.REDIS_HOST ? '(from env)' : '(default)');
-      console.log('   Port:', port, process.env.REDIS_PORT ? '(from env)' : '(default)');
-      console.log('   Password:', password ? '***' : 'none', process.env.REDIS_PASSWORD ? '(from env)' : '(default)');
+      // console.log('🔧 Redis configuration:');
+      // console.log('   Host:', host, process.env.REDIS_HOST ? '(from env)' : '(default)');
+      // console.log('   Port:', port, process.env.REDIS_PORT ? '(from env)' : '(default)');
+      // console.log('   Password:', password ? '***' : 'none', process.env.REDIS_PASSWORD ? '(from env)' : '(default)');
 
       this.client = redis.createClient({
         host: host,
@@ -108,7 +108,7 @@ class RedisCacheManager {
         return JSON.parse(data);
       }
       
-      console.log(`⚠️ Cache MISS: ${key}`);
+      // console.log(`⚠️ Cache MISS: ${key}`);
       return null;
     } catch (error) {
       console.error(`❌ Cache GET error for ${prefix}:`, error.message);

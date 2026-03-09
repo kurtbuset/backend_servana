@@ -41,25 +41,16 @@ class CacheService {
       return departments;
     }
     
-    console.log('⚠️ Cache MISS: No departments found in cache');
     return null; // Let the service handle database fetching
   }
 
   async updateDepartments(departments) {
     // Write-through: Cache the departments with 4-hour TTL
-    const result = await this.cache.set('DEPARTMENT', 'all', departments);
-    if (result) {
-      console.log(`✅ Write-through: Cached ${departments.length} departments with 4-hour TTL`);
-    }
-    return result;
+    return await this.cache.set('DEPARTMENT', 'all', departments);
   }
 
   async invalidateDepartments() {
-    const result = await this.cache.delete('DEPARTMENT', 'all');
-    if (result) {
-      console.log('🧹 Invalidated departments cache');
-    }
-    return result;
+    return await this.cache.delete('DEPARTMENT', 'all');
   }
 
   /**
@@ -71,11 +62,7 @@ class CacheService {
   }
 
   async updateRoles(roles) {
-    const result = await this.cache.set('ROLE', 'all', roles);
-    if (result) {
-      console.log(`✅ Write-through: Cached ${roles.length} roles`);
-    }
-    return result;
+    return await this.cache.set('ROLE', 'all', roles);
   }
 
   async invalidateRoles() {
@@ -93,11 +80,7 @@ class CacheService {
 
   async setCannedMessages(roleId, messages, userId = null) {
     const cacheKey = userId ? `${roleId}_${userId}` : roleId;
-    const result = await this.cache.set('CANNED_MESSAGES', cacheKey, messages);
-    if (result) {
-      console.log(`✅ Cached ${messages.length} canned messages for role ${roleId}${userId ? ` and user ${userId}` : ''}`);
-    }
-    return result;
+    return await this.cache.set('CANNED_MESSAGES', cacheKey, messages);
   }
 
   async invalidateCannedMessages(roleId, userId = null) {
@@ -114,19 +97,11 @@ class CacheService {
   }
 
   async updateAutoReplies(autoReplies) {
-    const result = await this.cache.set('AUTO_REPLY', 'all', autoReplies);
-    if (result) {
-      console.log(`✅ Write-through: Cached ${autoReplies.length} auto-replies with 2-hour TTL`);
-    }
-    return result;
+    return await this.cache.set('AUTO_REPLY', 'all', autoReplies);
   }
 
   async invalidateAutoReplies() {
-    const result = await this.cache.delete('AUTO_REPLY', 'all');
-    if (result) {
-      console.log('🧹 Invalidated auto-replies cache');
-    }
-    return result;
+    return await this.cache.delete('AUTO_REPLY', 'all');
   }
 
   /**
@@ -138,19 +113,11 @@ class CacheService {
   }
 
   async updateAgents(agents) {
-    const result = await this.cache.set('AGENT', 'all', agents);
-    if (result) {
-      console.log(`✅ Write-through: Cached ${agents.length} agents with 2-hour TTL`);
-    }
-    return result;
+    return await this.cache.set('AGENT', 'all', agents);
   }
 
   async invalidateAgents() {
-    const result = await this.cache.delete('AGENT', 'all');
-    if (result) {
-      console.log('🧹 Invalidated agents cache');
-    }
-    return result;
+    return await this.cache.delete('AGENT', 'all');
   }
 
   /**
@@ -162,19 +129,11 @@ class CacheService {
   }
 
   async updateUsersWithRoles(usersWithRoles) {
-    const result = await this.cache.set('CHANGE_ROLE', 'users_with_roles', usersWithRoles);
-    if (result) {
-      console.log(`✅ Write-through: Cached ${usersWithRoles.length} users with roles with 1-hour TTL`);
-    }
-    return result;
+    return await this.cache.set('CHANGE_ROLE', 'users_with_roles', usersWithRoles);
   }
 
   async invalidateUsersWithRoles() {
-    const result = await this.cache.delete('CHANGE_ROLE', 'users_with_roles');
-    if (result) {
-      console.log('🧹 Invalidated users with roles cache');
-    }
-    return result;
+    return await this.cache.delete('CHANGE_ROLE', 'users_with_roles');
   }
 
   /**
@@ -277,7 +236,6 @@ class CacheService {
     ];
     
     await Promise.all(promises);
-    console.log(`🧹 Invalidated all cache data for ${userType} ${userId}`);
   }
 
   async invalidateAllDepartmentData() {
@@ -287,7 +245,6 @@ class CacheService {
     ];
     
     await Promise.all(promises);
-    console.log('🧹 Invalidated all department-related cache data');
   }
 
   /**

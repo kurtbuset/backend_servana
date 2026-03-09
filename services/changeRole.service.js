@@ -17,7 +17,7 @@ class ChangeRoleService {
       }
       
       // Cache miss - use business logic for data fetching
-      console.log('⚠️ Cache MISS: Fetching users with roles from database');
+      // console.log('⚠️ Cache MISS: Fetching users with roles from database');
       
       const { data: users, error: userError } = await supabase
         .from("sys_user")
@@ -71,7 +71,7 @@ class ChangeRoleService {
 
       // Cache the result for future requests with 1-hour TTL
       await cacheService.updateUsersWithRoles(response);
-      console.log(`✅ Cached ${response.length} users with roles with 1-hour TTL using write-through strategy`);
+      // console.log(`✅ Cached ${response.length} users with roles with 1-hour TTL using write-through strategy`);
 
       return response;
     } catch (error) {
@@ -107,7 +107,7 @@ class ChangeRoleService {
       }
       
       // Cache miss - use business logic for data fetching
-      console.log('⚠️ Cache MISS: Fetching roles from database');
+      // console.log('⚠️ Cache MISS: Fetching roles from database');
       const { data, error } = await supabase
         .from("role")
         .select("role_id, role_name, role_is_active")
@@ -118,7 +118,7 @@ class ChangeRoleService {
       // Cache the result for future requests with 24-hour TTL
       if (data) {
         await cacheService.updateRoles(data);
-        console.log(`✅ Cached ${data.length} roles with 24-hour TTL using write-through strategy`);
+        // console.log(`✅ Cached ${data.length} roles with 24-hour TTL using write-through strategy`);
       }
       
       return data || [];

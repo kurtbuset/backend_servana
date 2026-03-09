@@ -177,7 +177,8 @@ class WebSocketAuth {
       const refreshToken = this.extractRefreshToken(socket);
       
       if (!refreshToken) {
-        throw new Error('No refresh token available');
+        console.log('No refresh token available for socket', socket.id);
+        return null;
       }
 
       // Check if access token is close to expiry
@@ -190,15 +191,25 @@ class WebSocketAuth {
 
       const now = Date.now();
       const timeUntilExpiry = expiration - now;
-      const fiveMinutes = 5 * 60 * 1000;
+      const threeMinutes = 3 * 60 * 1000;
 
-      // Refresh if token expires in less than 5 minutes
-      if (timeUntilExpiry < fiveMinutes) {
-        return await this.refreshToken(refreshToken);
+      // Refresh if token expires in less than 3 minutes
+      if (timeUntilExpiry < threeMinutes && timeUntilExpiry > 0) {
+        const refreshed = await this.refreshToken(refreshToken);
+        
+        // Emit new token to client so they can update cookies
+        socket.emit('token_refresh_required', {
+          access_token: refreshed.access_token,
+          refresh_token: refreshed.refresh_token,
+          expires_at: refreshed.expires_at
+        });
+        
+        return refreshed;
       }
 
       return null; // No refresh needed
     } catch (error) {
+      console.error('Token refresh failed:', error.message);
       return null;
     }
   }

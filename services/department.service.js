@@ -17,7 +17,7 @@ class DepartmentService {
       }
       
       // Cache miss - use business logic for data fetching
-      console.log('⚠️ Cache MISS: Fetching departments from database');
+      // console.log('⚠️ Cache MISS: Fetching departments from database');
       const { data, error } = await supabase
         .from("department")
         .select("*")
@@ -28,7 +28,7 @@ class DepartmentService {
       // Cache the result for future requests with 4-hour TTL
       if (data) {
         await cacheService.updateDepartments(data);
-        console.log(`✅ Cached ${data.length} departments with 4-hour TTL using write-through strategy`);
+        // console.log(`✅ Cached ${data.length} departments with 4-hour TTL using write-through strategy`);
       }
       
       return data || [];
@@ -153,7 +153,7 @@ class DepartmentService {
       }
       
       // Cache miss - use business logic for data fetching
-      console.log(`⚠️ Cache MISS: Fetching department members from database for dept ${deptId}`);
+      // console.log(`⚠️ Cache MISS: Fetching department members from database for dept ${deptId}`);
       
       const { data: userDepartments, error } = await supabase
         .from("sys_user_department")
@@ -180,7 +180,7 @@ class DepartmentService {
       if (!userDepartments || userDepartments.length === 0) {
         // Cache empty result to avoid repeated database queries
         await cacheService.cache.set('DEPARTMENT', cacheKey, [], 30 * 60); // 30 minutes TTL
-        console.log(`✅ Cached empty department members result for dept ${deptId} with 30-minute TTL`);
+        // console.log(`✅ Cached empty department members result for dept ${deptId} with 30-minute TTL`);
         return [];
       }
 
@@ -252,7 +252,7 @@ class DepartmentService {
       
       // Cache the result for 30 minutes (department membership changes moderately)
       await cacheService.cache.set('DEPARTMENT', cacheKey, members, 30 * 60);
-      console.log(`✅ Cached ${members.length} department members for dept ${deptId} with 30-minute TTL`);
+      // console.log(`✅ Cached ${members.length} department members for dept ${deptId} with 30-minute TTL`);
       
       return members;
     } catch (error) {

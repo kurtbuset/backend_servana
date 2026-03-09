@@ -196,6 +196,41 @@ class QueueService {
   }
 
   /**
+   * Get chat group details for socket notifications
+   */
+  async getChatGroupDetails(chatGroupId) {
+    try {
+      const { data, error } = await supabase
+        .from("chat_group")
+        .select(`
+          chat_group_id,
+          dept_id,
+          client_id,
+          sys_user_id,
+          status,
+          department:department(dept_name),
+          client:client!chat_group_client_id_fkey(
+            client_id,
+            client_number,
+            prof_id,
+            profile:profile(
+              prof_firstname,
+              prof_lastname
+            )
+          )
+        `)
+        .eq("chat_group_id", chatGroupId)
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('❌ Error getting chat group details:', error.message);
+      return null;
+    }
+  }
+
+  /**
    * Clear department cache for a specific user
    */
   async clearDepartmentCache(userId = null) {

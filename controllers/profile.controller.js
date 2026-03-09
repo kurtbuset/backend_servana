@@ -1,6 +1,7 @@
 const express = require("express");
 const multer = require("multer");
 const profileService = require("../services/profile.service");
+const agentStatusService = require("../services/agentStatus.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
 const { checkPermission } = require("../middleware/checkPermission");
 const { PERMISSIONS } = require("../constants/permissions");
@@ -25,8 +26,8 @@ class ProfileController {
     // Get agent status
     router.get("/agent-status", (req, res) => this.getAgentStatus(req, res));
 
-    // Update agent status
-    router.put("/agent-status", (req, res) => this.updateAgentStatus(req, res));
+    // Note: Agent status updates are now handled via Socket.IO events
+    // Use socket event 'updateAgentStatus' instead of REST API
 
     return router;
   }
@@ -130,12 +131,6 @@ class ProfileController {
       const sysUserId = req.userId;
       const { firstName, middleName, lastName, email, address, dateOfBirth } = req.body;
 
-      // Check if user has permission to manage profile
-      const hasPermission = await profileService.checkUserPermission(sysUserId, 'priv_can_manage_profile');
-      if (!hasPermission) {
-        return res.status(403).json({ error: "You don't have permission to edit your profile" });
-      }
-
       const profId = await profileService.getProfileId(sysUserId);
 
       // Update email if provided
@@ -174,12 +169,6 @@ class ProfileController {
 
       if (!file) {
         return res.status(400).json({ error: "No image uploaded" });
-      }
-
-      // Check if user has permission to manage profile
-      const hasPermission = await profileService.checkUserPermission(sysUserId, 'priv_can_manage_profile');
-      if (!hasPermission) {
-        return res.status(403).json({ error: "You don't have permission to edit your profile" });
       }
 
       const profId = await profileService.getProfileId(sysUserId);
@@ -234,64 +223,21 @@ class ProfileController {
 
   /**
    * Update agent status
+   * @deprecated Use Socket.IO event 'updateAgentStatus' instead
    */
   async updateAgentStatus(req, res) {
     try {
-      const sysUserId = req.userId;
-      const { agent_status } = req.body;
-
-      const validStatuses = ['accepting_chats', 'not_accepting_chats', 'offline'];
-      
-      if (!agent_status || !validStatuses.includes(agent_status)) {
-        return res.status(400).json({ 
-          error: "Invalid agent_status. Must be one of: accepting_chats, not_accepting_chats, offline" 
-        });
-      }
-
-      // Update agent status in database
-      await profileService.updateAgentStatus(sysUserId, agent_status);
-
-      // Emit socket event for real-time update
-      const io = req.app.get('io');
-      if (io) {
-        io.emit('agentStatusChanged', {
-          userId: sysUserId,
-          agent_status,
-          timestamp: new Date()
-        });
-        console.log(`📡 Broadcasted agent status change: ${sysUserId} -> ${agent_status}`);
-      }
-
-      // If agent is now accepting chats, assign queued chats
-      if (agent_status === 'accepting_chats') {
-        const agentAssignmentService = require('../services/agentAssignment.service');
-        
-        // Run assignment in background
-        agentAssignmentService.assignQueuedChatsToAgent(sysUserId)
-          .then(assignedChats => {
-            if (assignedChats.length > 0) {
-              console.log(`✅ Assigned ${assignedChats.length} queued chats to agent ${sysUserId}`);
-              
-              // Broadcast assignments via Socket.IO notifier
-              if (io && io.socketConfig) {
-                const notifier = io.socketConfig.getChatGroupNotifier();
-                if (notifier) {
-                  notifier.notifyQueuedChatsAssigned(assignedChats, sysUserId);
-                }
-              }
-            }
-          })
-          .catch(err => {
-            console.error('❌ Error assigning queued chats:', err.message);
-          });
-      }
-
-      res.json({ 
-        message: "Agent status updated successfully",
-        agent_status 
+      res.status(410).json({ 
+        error: "This endpoint is deprecated. Use Socket.IO event 'updateAgentStatus' instead.",
+        message: "Agent status updates are now handled via Socket.IO for real-time synchronization."
       });
     } catch (err) {
-      console.error("Error updating agent status:", err.message);
+      console.error("Error in deprecated updateAgentStatus:", err.message);
+      
+      if (err.message.includes('Invalid agent_status')) {
+        return res.status(400).json({ error: err.message });
+      }
+      
       res.status(500).json({ error: "Server error updating agent status" });
     }
   }

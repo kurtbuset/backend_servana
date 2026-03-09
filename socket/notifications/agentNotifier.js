@@ -57,7 +57,7 @@ class AgentNotifier {
         const departmentRoom = `department_${departmentId}`;
         
         this.io.to(departmentRoom).emit('customerListUpdate', {
-          type: 'new_queued',
+          type: 'new_queued_chat',
           data: customerUpdate
         });
 

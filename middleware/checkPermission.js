@@ -35,7 +35,6 @@ const checkPermission = (permission) => {
           error: `Access denied. Required permission: ${permission}` 
         });
       }
-      console.log('user has permission!')
       next();
     } catch (error) {
       console.error(`❌ Permission check failed for ${permission}:`, error.message);

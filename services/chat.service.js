@@ -284,7 +284,7 @@ class ChatService {
         // Execute all cache operations in parallel
         if (cachePromises.length > 0) {
           await Promise.all(cachePromises);
-          console.log(`✅ Cached messages for ${cachePromises.length} chat groups in parallel`);
+          // console.log(`✅ Cached messages for ${cachePromises.length} chat groups in parallel`);
         }
       }
 
