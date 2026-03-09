@@ -63,7 +63,7 @@ class OtpService {
   }
 
   /**
-   * Validate rate limit
+   * Validate rate limit  
    * Throws error if rate limit exceeded
    */
   async validateRateLimit(phoneCountryCode, phoneNumber) {

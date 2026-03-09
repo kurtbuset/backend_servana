@@ -73,6 +73,25 @@ class AuthService {
   }
 
   /**
+   * Refresh session using refresh token
+   */
+  async refreshSession(refreshToken) {
+    const { data, error } = await supabase.auth.refreshSession({
+      refresh_token: refreshToken
+    });
+
+    if (error) {
+      throw new Error("Token refresh failed: " + error.message);
+    }
+
+    if (!data?.session || !data?.user) {
+      throw new Error("No session data returned");
+    }
+
+    return data;
+  }
+
+  /**
    * Update agent status
    */
   async updateAgentStatus(userId, status) {

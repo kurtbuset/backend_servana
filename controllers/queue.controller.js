@@ -121,6 +121,21 @@ class QueueController {
 
       const chatGroup = await queueService.acceptChat(chatGroupId, userId);
 
+      // Emit socket notification for accepted chat
+      const io = req.app.get('io');
+      if (io && io.socketConfig) {
+        console.log('reached!')
+        const notifier = io.socketConfig.getChatGroupNotifier();
+        if (notifier) {
+          // Get chat group details for notification
+          const chatGroupDetails = await queueService.getChatGroupDetails(chatGroupId);
+          
+          if (chatGroupDetails) {
+            await notifier.notifyChatAccepted(chatGroupDetails, userId);
+          }
+        }
+      }
+
       res.json({
         success: true,
         message: "Chat accepted successfully",

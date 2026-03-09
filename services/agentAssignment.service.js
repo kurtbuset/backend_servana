@@ -1,5 +1,6 @@
 const supabase = require("../helpers/supabaseClient");
 const cacheService = require("./cache.service");
+const redisClient = require("../helpers/redisClient");
 
 /**
  * Agent Assignment Service
@@ -7,8 +8,39 @@ const cacheService = require("./cache.service");
  */
 class AgentAssignmentService {
   constructor() {
-    // Track last assigned agent per department for round-robin
-    this.lastAssignedAgent = new Map(); // dept_id -> sys_user_id
+    this.REDIS_KEY_PREFIX = "round_robin:dept:";
+    this.REDIS_TTL = 86400; // 24 hours TTL to prevent memory leak
+  }
+
+  /**
+   * Get last assigned agent for a department from Redis
+   * @param {number} deptId - Department ID
+   * @returns {Promise<number|null>} Last assigned agent ID or null
+   */
+  async getLastAssignedAgent(deptId) {
+    try {
+      const key = `${this.REDIS_KEY_PREFIX}${deptId}`;
+      const agentId = await redisClient.get(key);
+      return agentId ? parseInt(agentId, 10) : null;
+    } catch (error) {
+      console.error(`❌ Error getting last assigned agent from Redis:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Set last assigned agent for a department in Redis
+   * @param {number} deptId - Department ID
+   * @param {number} agentId - Agent user ID
+   */
+  async setLastAssignedAgent(deptId, agentId) {
+    try {
+      const key = `${this.REDIS_KEY_PREFIX}${deptId}`;
+      await redisClient.setex(key, this.REDIS_TTL, agentId.toString());
+    } catch (error) {
+      console.error(`❌ Error setting last assigned agent in Redis:`, error.message);
+      // Don't throw - round-robin will still work, just less optimal
+    }
   }
 
   /**
@@ -18,7 +50,7 @@ class AgentAssignmentService {
    */
   async getAvailableAgents(deptId) {
     try {
-      const { data: agents, error } = await supabase
+      const { data: agents, error } = await supabase  
         .from("sys_user_department")
         .select(`
           sys_user_id,
@@ -49,6 +81,48 @@ class AgentAssignmentService {
     } catch (error) {
       console.error("❌ Error in getAvailableAgents:", error.message);
       return [];
+    }
+  }
+
+  /**
+   * Get agent workload for multiple agents (batch query)
+   * @param {Array<number>} agentIds - Array of agent user IDs
+   * @returns {Promise<Object>} Object mapping agentId to workload count
+   */
+  async getAgentWorkloads(agentIds) {
+    try {
+      if (!agentIds || agentIds.length === 0) {
+        return {};
+      }
+
+      // Single query to get all workloads
+      const { data, error } = await supabase
+        .from("chat_group")
+        .select("sys_user_id")
+        .in("sys_user_id", agentIds)
+        .eq("status", "active");
+
+      if (error) throw error;
+
+      // Count workloads in memory
+      const workloads = {};
+      agentIds.forEach(id => workloads[id] = 0);
+      
+      if (data) {
+        data.forEach(row => {
+          if (workloads[row.sys_user_id] !== undefined) {
+            workloads[row.sys_user_id]++;
+          }
+        });
+      }
+
+      return workloads;
+    } catch (error) {
+      console.error("❌ Error getting agent workloads:", error.message);
+      // Return zero workload for all agents on error
+      const workloads = {};
+      agentIds.forEach(id => workloads[id] = 0);
+      return workloads;
     }
   }
 
@@ -89,13 +163,14 @@ class AgentAssignmentService {
     }
 
     try {
-      // Get workload for all available agents
-      const agentWorkloads = await Promise.all(
-        availableAgents.map(async (agentId) => ({
-          agentId,
-          workload: await this.getAgentWorkload(agentId)
-        }))
-      );
+      // Get workload for all available agents in a single query
+      const workloadMap = await this.getAgentWorkloads(availableAgents);
+
+      // Build agent workload array
+      const agentWorkloads = availableAgents.map(agentId => ({
+        agentId,
+        workload: workloadMap[agentId] || 0
+      }));
 
       // Sort by workload (ascending) to balance load
       agentWorkloads.sort((a, b) => a.workload - b.workload);
@@ -108,11 +183,12 @@ class AgentAssignmentService {
 
       // If multiple agents have same workload, use round-robin
       if (leastLoadedAgents.length === 1) {
+        await this.setLastAssignedAgent(deptId, leastLoadedAgents[0]);
         return leastLoadedAgents[0];
       }
 
       // Round-robin among least loaded agents
-      const lastAssigned = this.lastAssignedAgent.get(deptId);
+      const lastAssigned = await this.getLastAssignedAgent(deptId);
       let selectedAgent;
 
       if (!lastAssigned || !leastLoadedAgents.includes(lastAssigned)) {
@@ -126,18 +202,18 @@ class AgentAssignmentService {
       }
 
       // Update last assigned agent for this department
-      this.lastAssignedAgent.set(deptId, selectedAgent);
+      await this.setLastAssignedAgent(deptId, selectedAgent);
 
       console.log(`🔄 Round-robin selected agent ${selectedAgent} for dept ${deptId} (workload: ${minWorkload})`);
       return selectedAgent;
     } catch (error) {
       console.error("❌ Error in selectNextAgent:", error.message);
       // Fallback to simple round-robin
-      const lastAssigned = this.lastAssignedAgent.get(deptId);
+      const lastAssigned = await this.getLastAssignedAgent(deptId);
       const lastIndex = lastAssigned ? availableAgents.indexOf(lastAssigned) : -1;
       const nextIndex = (lastIndex + 1) % availableAgents.length;
       const selectedAgent = availableAgents[nextIndex];
-      this.lastAssignedAgent.set(deptId, selectedAgent);
+      await this.setLastAssignedAgent(deptId, selectedAgent);
       return selectedAgent;
     }
   }
@@ -276,15 +352,37 @@ class AgentAssignmentService {
 
       const deptIds = agentDepts.map(d => d.dept_id);
 
-      // Get queued chat groups in agent's departments
+      // Check agent status ONCE before processing
+      const { data: agentData, error: agentError } = await supabase
+        .from("sys_user")
+        .select("agent_status")
+        .eq("sys_user_id", agentId)
+        .single();
+
+      if (agentError || agentData?.agent_status !== "accepting_chats") {
+        console.log(`⚠️ Agent ${agentId} is not accepting chats`);
+        return [];
+      }
+
+      // Check agent's current workload ONCE
+      const currentWorkload = await this.getAgentWorkload(agentId);
+      const maxWorkload = 5;
+      const availableSlots = Math.max(0, maxWorkload - currentWorkload);
+
+      if (availableSlots === 0) {
+        console.log(`⚠️ Agent ${agentId} already at max workload (${currentWorkload})`);
+        return [];
+      }
+
+      // Get queued chat groups in agent's departments (limit by available slots)
       const { data: queuedChats, error: queueError } = await supabase
         .from("chat_group")
-        .select("chat_group_id, dept_id, created_at")
+        .select("chat_group_id, dept_id, client_id, created_at")
         .in("dept_id", deptIds)
         .eq("status", "queued")
         .is("sys_user_id", null)
         .order("created_at", { ascending: true }) // Oldest first
-        .limit(5); // Limit to prevent overwhelming the agent
+        .limit(availableSlots);
 
       if (queueError || !queuedChats || queuedChats.length === 0) {
         console.log(`📭 No queued chats found for agent ${agentId}`);
@@ -293,39 +391,34 @@ class AgentAssignmentService {
 
       console.log(`📬 Found ${queuedChats.length} queued chats for agent ${agentId}`);
 
-      // Assign queued chats to this agent
-      const assignedChats = [];
-      for (const chat of queuedChats) {
-        try {
-          // Check if agent is still available
-          const { data: agentStatus } = await supabase
-            .from("sys_user")
-            .select("agent_status")
-            .eq("sys_user_id", agentId)
-            .single();
+      // Batch assign all chats to this agent in a single query
+      const chatGroupIds = queuedChats.map(chat => chat.chat_group_id);
+      
+      const { data: assignedChats, error: assignError } = await supabase
+        .from("chat_group")
+        .update({
+          sys_user_id: agentId,
+          status: "active"
+        })
+        .in("chat_group_id", chatGroupIds)
+        .is("sys_user_id", null) // Only assign if still unassigned (race condition protection)
+        .select("chat_group_id, dept_id, client_id, status");
 
-          if (agentStatus?.agent_status !== "accepting_chats") {
-            console.log(`⚠️ Agent ${agentId} no longer accepting chats, stopping assignment`);
-            break;
-          }
-
-          // Check agent's current workload
-          const workload = await this.getAgentWorkload(agentId);
-          if (workload >= 5) { // Max 5 concurrent chats
-            console.log(`⚠️ Agent ${agentId} reached max workload (${workload}), stopping assignment`);
-            break;
-          }
-
-          const chatGroup = await this.assignChatGroupToAgent(chat.chat_group_id, agentId);
-          assignedChats.push(chatGroup);
-        } catch (error) {
-          console.error(`❌ Error assigning chat ${chat.chat_group_id}:`, error.message);
-          // Continue with next chat
-        }
+      if (assignError) {
+        console.error(`❌ Error batch assigning chats:`, assignError.message);
+        return [];
       }
 
-      console.log(`✅ Assigned ${assignedChats.length} queued chats to agent ${agentId}`);
-      return assignedChats;
+      // Invalidate cache for assigned chats
+      if (assignedChats && assignedChats.length > 0) {
+        const cachePromises = assignedChats.map(chat => 
+          cacheService.invalidateChatGroup(chat.chat_group_id)
+        );
+        await Promise.all(cachePromises);
+      }
+
+      console.log(`✅ Assigned ${assignedChats?.length || 0} queued chats to agent ${agentId}`);
+      return assignedChats || [];
     } catch (error) {
       console.error(`❌ Error in assignQueuedChatsToAgent:`, error.message);
       return [];

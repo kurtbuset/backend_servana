@@ -4,11 +4,9 @@
  */
 
 const ChatEvents = require('./chatEvents');
-const UserStatusEvents = require('./userStatusEvents');
 const AgentStatusEvents = require('./agentStatusEvents');
 
 module.exports = {
   ChatEvents,
-  UserStatusEvents,
   AgentStatusEvents
 };

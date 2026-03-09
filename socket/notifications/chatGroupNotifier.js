@@ -121,6 +121,168 @@ class ChatGroupNotifier {
   }
 
   /**
+   * Notify when an agent manually accepts a queued chat
+   * @param {Object} chatGroupDetails - Chat group details
+   * @param {number} agentId - Agent ID who accepted the chat
+   */
+  async notifyChatAccepted(chatGroupDetails, agentId) {
+    console.log('reached notifyChatAccepted')
+    if (!this.io) {
+      console.error('❌ Socket.IO instance not set in ChatGroupNotifier');
+      return;
+    }
+
+    console.log(`✅ Agent ${agentId} accepted chat ${chatGroupDetails.chat_group_id}`);
+
+    try {
+      const client = chatGroupDetails.client;
+      const department = chatGroupDetails.department;
+
+      if (!client || !department) {
+        console.error('❌ Missing client or department info for chat acceptance notification');
+        return;
+      }
+
+      const fullName = client.profile
+        ? `${client.profile.prof_firstname} ${client.profile.prof_lastname}`.trim()
+        : "Unknown Client";
+
+      // Get profile image
+      // let profileImage = null;
+      // if (client.prof_id) {
+      //   const { data: images } = await require('../helpers/supabaseClient')
+      //     .from("image")
+      //     .select("img_location, img_is_current")
+      //     .eq("prof_id", client.prof_id)
+      //     .order("img_is_current", { ascending: false })
+      //     .limit(1);
+        
+      //   if (images && images.length > 0) {
+      //     profileImage = images[0].img_location;
+      //   }
+      // }
+
+      const customerUpdate = {
+        chat_group_id: chatGroupDetails.chat_group_id,
+        client_id: chatGroupDetails.client_id,
+        timestamp: new Date().toISOString(),
+        department_id: chatGroupDetails.dept_id,
+        customer: {
+          id: client.client_id,
+          chat_group_id: chatGroupDetails.chat_group_id,
+          name: fullName,
+          number: client.client_number,
+          // profile: profileImage,
+          time: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          status: 'active',
+          chat_type: 'active',
+          sys_user_id: agentId,
+          department: department.dept_name || 'Unknown',
+        }
+      };
+
+      // Emit to the agent who accepted - show as active chat
+      // for notifying the client in mobile
+      this.io.to(`agent_${agentId}`).emit('customerListUpdate', {
+        type: 'chat_accepted',
+        data: customerUpdate
+      });
+
+      // Emit to ALL agents in department to remove from their queue/list
+      this.io.to(`department_${chatGroupDetails.dept_id}`).emit('customerListUpdate', {
+        type: 'remove_chat_group',
+        data: {
+          chat_group_id: chatGroupDetails.chat_group_id,
+          accepted_by: agentId,
+          department_id: chatGroupDetails.dept_id
+        }
+      }); 
+
+      console.log('chat removed from the queue')
+
+      // console.log(`📡 Chat acceptance notification sent for chat ${chatGroupDetails.chat_group_id}`);
+    } catch (error) {
+      console.error(`❌ Error sending chat acceptance notification:`, error);
+    }
+  }
+  /**
+   * Notify when a chat is transferred to another department
+   * @param {Object} transferDetails - Transfer details
+   * @param {number} transferDetails.chat_group_id - Chat group ID
+   * @param {number} transferDetails.old_dept_id - Previous department ID
+   * @param {number} transferDetails.new_dept_id - New department ID
+   * @param {number} transferDetails.client_id - Client ID
+   * @param {number} transferDetails.transferred_by - Agent ID who transferred
+   */
+  async notifyChatTransferred(transferDetails) {
+    if (!this.io) {
+      console.error('❌ Socket.IO instance not set in ChatGroupNotifier');
+      return;
+    }
+
+    console.log(`✅ Chat ${transferDetails.chat_group_id} transferred from dept ${transferDetails.old_dept_id} to dept ${transferDetails.new_dept_id}`);
+
+    try {
+      const chatGroupHelper = require('../helpers/chatGroupHelper');
+      const clientHelper = require('../helpers/clientHelper');
+
+      const chatGroupInfo = await chatGroupHelper.getChatGroupInfo(transferDetails.chat_group_id);
+      const clientInfo = await clientHelper.getClientInfo(transferDetails.client_id);
+
+      if (!chatGroupInfo || !clientInfo) {
+        console.error('❌ Missing chat group or client info for transfer notification');
+        return;
+      }
+
+      // Emit to old department - remove from their lists
+      this.io.to(`department_${transferDetails.old_dept_id}`).emit('customerListUpdate', {
+        type: 'chat_transferred_out',
+        data: {
+          chat_group_id: transferDetails.chat_group_id,
+          new_dept_id: transferDetails.new_dept_id,
+          transferred_by: transferDetails.transferred_by
+        }
+      });
+
+      // Emit to new department - add to their queue
+      const timestamp = new Date();
+      const customerUpdate = {
+        chat_group_id: transferDetails.chat_group_id,
+        client_id: transferDetails.client_id,
+        timestamp: timestamp.toISOString(),
+        department_id: transferDetails.new_dept_id,
+        customer: {
+          id: clientInfo.client_id,
+          chat_group_id: transferDetails.chat_group_id,
+          name: clientInfo.name,
+          number: clientInfo.client_number,
+          profile: clientInfo.profile_image,
+          time: timestamp.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          status: 'transferred',
+          chat_type: 'queued',
+          department: chatGroupInfo.department?.dept_name || 'Unknown',
+          created_at: timestamp.toISOString(),
+        }
+      };
+
+      this.io.to(`department_${transferDetails.new_dept_id}`).emit('customerListUpdate', {
+        type: 'chat_transferred_in',
+        data: customerUpdate
+      });
+
+      console.log(`📡 Chat transfer notification sent for chat ${transferDetails.chat_group_id}`);
+    } catch (error) {
+      console.error(`❌ Error sending chat transfer notification:`, error);
+    }
+  }
+
+  /**
    * Internal method: Notify about chat assignment (to agent)
    * @private
    */
@@ -174,7 +336,7 @@ class ChatGroupNotifier {
    * Internal method: Notify about chat being queued
    * @private
    */
-  _notifyChatQueued(chatData) {
+  async _notifyChatQueued(chatData) {
     const timestamp = new Date();
     const payload = {
       chat_group_id: chatData.chat_group_id,
@@ -191,6 +353,49 @@ class ChatGroupNotifier {
     }
 
     console.log(`📡 Chat queued: ${payload.chat_group_id} in dept ${payload.dept_id}`);
+
+    // Emit customerListUpdate to agents in the department
+    try {
+      const chatGroupHelper = require('../helpers/chatGroupHelper');
+      const clientHelper = require('../helpers/clientHelper');
+
+      const chatGroupInfo = await chatGroupHelper.getChatGroupInfo(chatData.chat_group_id);
+      const clientInfo = await clientHelper.getClientInfo(chatData.client_id);
+
+      if (chatGroupInfo && clientInfo) {
+        const customerUpdate = {
+          chat_group_id: chatData.chat_group_id,
+          client_id: chatData.client_id,
+          timestamp: timestamp.toISOString(),
+          department_id: chatGroupInfo.dept_id,
+          customer: {
+            id: clientInfo.client_id,
+            chat_group_id: chatData.chat_group_id,
+            name: clientInfo.name,
+            number: clientInfo.client_number,
+            profile: clientInfo.profile_image,
+            time: timestamp.toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+            status: 'queued',
+            chat_type: 'queued',
+            department: chatGroupInfo.department?.dept_name || 'Unknown',
+            created_at: timestamp.toISOString(),
+          }
+        };
+
+        // Emit to all agents in the department
+        this.io.to(`department_${chatData.dept_id}`).emit('customerListUpdate', {
+          type: 'new_queued_chat',
+          data: customerUpdate
+        });
+
+        console.log(`📡 Customer list update sent to department ${chatData.dept_id} for new queued chat ${chatData.chat_group_id}`);
+      }
+    } catch (error) {
+      console.error(`❌ Error sending customerListUpdate for queued chat ${chatData.chat_group_id}:`, error);
+    }
   }
 }
 
