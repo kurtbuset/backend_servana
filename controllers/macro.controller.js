@@ -11,22 +11,28 @@ class MacroController {
 
     router.use(getCurrentUser);
 
-    // Get all macros for a specific role (dynamic) - requires canned message permission
+    // Get all macros for a specific role (dynamic) - requires view macros permission
     router.get("/:roleType", 
-      checkPermission(PERMISSIONS.USE_CANNED_MESS),
+      checkPermission(PERMISSIONS.VIEW_MACROS),
       (req, res) => this.getMacrosByRoleType(req, res)
     );
 
-    // Create new macro for a specific role (dynamic) - requires canned message permission
+    // Create new macro for a specific role (dynamic) - requires add macros permission
     router.post("/:roleType", 
-      checkPermission(PERMISSIONS.USE_CANNED_MESS),
+      checkPermission(PERMISSIONS.ADD_MACROS),
       (req, res) => this.createMacro(req, res)
     );
 
-    // Update existing macro - requires canned message permission
+    // Update existing macro - requires edit macros permission
     router.put("/:roleType/:id", 
-      checkPermission(PERMISSIONS.USE_CANNED_MESS),
+      checkPermission(PERMISSIONS.EDIT_MACROS),
       (req, res) => this.updateMacro(req, res)
+    );
+
+    // Delete macro - requires delete macros permission
+    router.delete("/:roleType/:id", 
+      checkPermission(PERMISSIONS.DELETE_MACROS),
+      (req, res) => this.deleteMacro(req, res)
     );
 
     return router;
@@ -124,6 +130,27 @@ class MacroController {
       res.json(result);
     } catch (error) {
       console.error(`Error updating ${req.params.roleType} macro:`, error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  /**
+   * Delete an existing macro
+   */
+  async deleteMacro(req, res) {
+    try {
+      const { roleType, id } = req.params;
+
+      if (!roleType || !['agent', 'client'].includes(roleType.toLowerCase())) {
+        return res.status(400).json({ 
+          error: "Invalid role type. Must be 'agent' or 'client'" 
+        });
+      }
+
+      const result = await macroService.deleteMacro(id);
+      res.json(result);
+    } catch (error) {
+      console.error(`Error deleting ${req.params.roleType} macro:`, error);
       res.status(500).json({ error: error.message });
     }
   }

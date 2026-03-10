@@ -11,40 +11,46 @@ class AutoReplyController {
     // Apply authentication middleware to all routes
     router.use(getCurrentUser);
 
-    // Get all auto replies - requires auto reply management permission
+    // Get all auto replies - requires view auto reply permission
     router.get("/", 
-      checkPermission(PERMISSIONS.MANAGE_AUTO_REPLY),
+      checkPermission(PERMISSIONS.VIEW_AUTO_REPLY),
       (req, res) => this.getAllAutoReplies(req, res)
     );
 
-    // Get active departments - requires auto reply management permission
+    // Get active departments - requires view auto reply permission
     router.get("/departments/active", 
-      checkPermission(PERMISSIONS.MANAGE_AUTO_REPLY),
+      checkPermission(PERMISSIONS.VIEW_AUTO_REPLY),
       (req, res) => this.getActiveDepartments(req, res)
     );
 
-    // Get all departments - requires auto reply management permission
+    // Get all departments - requires view auto reply permission
     router.get("/departments/all", 
-      checkPermission(PERMISSIONS.MANAGE_AUTO_REPLY),
+      checkPermission(PERMISSIONS.VIEW_AUTO_REPLY),
       (req, res) => this.getAllDepartments(req, res)
     );
 
-    // Create a new auto reply - requires auto reply management permission
+    // Create a new auto reply - requires add auto reply permission
     router.post("/", 
-      checkPermission(PERMISSIONS.MANAGE_AUTO_REPLY),
+      checkPermission(PERMISSIONS.ADD_AUTO_REPLY),
       (req, res) => this.createAutoReply(req, res)
     );
 
-    // Update an auto reply - requires auto reply management permission
+    // Update an auto reply - requires edit auto reply permission
     router.put("/:id", 
-      checkPermission(PERMISSIONS.MANAGE_AUTO_REPLY),
+      checkPermission(PERMISSIONS.EDIT_AUTO_REPLY),
       (req, res) => this.updateAutoReply(req, res)
     );
 
-    // Toggle auto reply active status - requires auto reply management permission
+    // Toggle auto reply active status - requires edit auto reply permission
     router.patch("/:id/toggle", 
-      checkPermission('priv_can_manage_auto_reply'),
+      checkPermission(PERMISSIONS.EDIT_AUTO_REPLY),
       (req, res) => this.toggleAutoReplyStatus(req, res)
+    );
+
+    // Delete auto reply - requires delete auto reply permission
+    router.delete("/:id", 
+      checkPermission(PERMISSIONS.DELETE_AUTO_REPLY),
+      (req, res) => this.deleteAutoReply(req, res)
     );
 
     return router;
@@ -144,6 +150,21 @@ class AutoReplyController {
     } catch (err) {
       console.error("Error toggling auto reply status:", err.message);
       res.status(500).json({ error: "Failed to toggle auto reply status" });
+    }
+  }
+
+  /**
+   * Delete an auto reply
+   */
+  async deleteAutoReply(req, res) {
+    try {
+      const { id } = req.params;
+
+      await autoReplyService.deleteAutoReply(id);
+      res.json({ message: "Auto reply deleted successfully" });
+    } catch (err) {
+      console.error("Error deleting auto reply:", err.message);
+      res.status(500).json({ error: "Failed to delete auto reply" });
     }
   }
 }

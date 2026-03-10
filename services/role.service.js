@@ -8,12 +8,32 @@ const permissionMap = {
   "Can send Macros": "priv_can_use_canned_mess",
   "Can End Chat": "priv_can_end_chat",
   "Can Transfer Department": "priv_can_transfer",
-  "Can Edit Department": "priv_can_manage_dept",
+  "Can View Departments": "priv_can_view_dept",
+  "Can Add Departments": "priv_can_add_dept",
+  "Can Edit Departments": "priv_can_edit_dept",
+  "Can Edit Department": "priv_can_manage_dept", // Legacy - kept for backward compatibility
   "Can Assign Department": "priv_can_assign_dept",
   "Can Edit Roles": "priv_can_manage_role",
-  "Can Assign Roles": "priv_can_assign_role",
+  "Can View Change Roles": "priv_can_view_change_roles",
+  "Can Edit Change Roles": "priv_can_edit_change_roles",
+  "Can Assign Roles": "priv_can_assign_role", // Legacy - kept for backward compatibility
   "Can Add Admin Accounts": "priv_can_create_account",
-  "Can Edit Auto-Replies": "priv_can_manage_auto_reply",
+  "Can View Auto-Replies": "priv_can_view_auto_reply",
+  "Can Add Auto-Replies": "priv_can_add_auto_reply",
+  "Can Edit Auto-Replies": "priv_can_edit_auto_reply",
+  "Can Delete Auto-Replies": "priv_can_delete_auto_reply",
+  "Can Manage Auto-Replies": "priv_can_manage_auto_reply", // Legacy - kept for backward compatibility
+  "Can View Macros": "priv_can_view_macros",
+  "Can Add Macros": "priv_can_add_macros",
+  "Can Edit Macros": "priv_can_edit_macros",
+  "Can Delete Macros": "priv_can_delete_macros",
+  "Can send Macros": "priv_can_use_canned_mess", // Legacy - kept for backward compatibility
+  "Can View Manage Agents": "priv_can_view_manage_agents",
+  "Can View Agents Information": "priv_can_view_agents_info",
+  "Can Create Agent Account": "priv_can_create_agent_account",
+  "Can Edit Manage Agents": "priv_can_edit_manage_agents",
+  "Can Edit Department Manage Agents": "priv_can_edit_dept_manage_agents",
+  "Can View Analytics Manage Agents": "priv_can_view_analytics_manage_agents",
 };
 
 class RoleService {
@@ -238,7 +258,7 @@ class RoleService {
           full_name: `${user.profile.prof_firstname || ''} ${user.profile.prof_lastname || ''}`.trim(),
           profile_image: user.prof_id ? imageMap[user.prof_id] || null : null
         } : null
-      }));
+      }));    
 
       return formattedMembers;
     } catch (error) {
