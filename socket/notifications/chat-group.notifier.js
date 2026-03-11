@@ -67,8 +67,8 @@ class ChatGroupNotifier {
     console.log(`✅ Broadcasting ${assignedChats.length} queued chat assignments to agent ${agentId}`);
 
     // Import helpers
-    const chatGroupHelper = require('../helpers/chatGroupHelper');
-    const clientHelper = require('../helpers/clientHelper');
+    const chatGroupHelper = require('../helpers/chat-group.helper');
+    const clientHelper = require('../helpers/client.helper');
 
     for (const chatGroup of assignedChats) {
       // Emit standard assignment notifications
@@ -226,8 +226,8 @@ class ChatGroupNotifier {
     console.log(`✅ Chat ${transferDetails.chat_group_id} transferred from dept ${transferDetails.old_dept_id} to dept ${transferDetails.new_dept_id}`);
 
     try {
-      const chatGroupHelper = require('../helpers/chatGroupHelper');
-      const clientHelper = require('../helpers/clientHelper');
+      const chatGroupHelper = require('../helpers/chat-group.helper');
+      const clientHelper = require('../helpers/client.helper');
 
       const chatGroupInfo = await chatGroupHelper.getChatGroupInfo(transferDetails.chat_group_id);
       const clientInfo = await clientHelper.getClientInfo(transferDetails.client_id);
@@ -356,8 +356,8 @@ class ChatGroupNotifier {
 
     // Emit customerListUpdate to agents in the department
     try {
-      const chatGroupHelper = require('../helpers/chatGroupHelper');
-      const clientHelper = require('../helpers/clientHelper');
+      const chatGroupHelper = require('../helpers/chat-group.helper');
+      const clientHelper = require('../helpers/client.helper');
 
       const chatGroupInfo = await chatGroupHelper.getChatGroupInfo(chatData.chat_group_id);
       const clientInfo = await clientHelper.getClientInfo(chatData.client_id);

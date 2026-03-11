@@ -22,10 +22,22 @@ class ChatController {
       (req, res) => this.getChatGroups(req, res)
     );
 
+    // Get resolved chat groups for current user - requires message viewing permission
+    router.get("/resolved-chatgroups", 
+      checkPermission(PERMISSIONS.VIEW_MESSAGE),
+      (req, res) => this.getResolvedChatGroups(req, res)
+    );
+
     // Transfer chat group to another department - requires message viewing permission
     router.post("/:chatGroupId/transfer", 
       checkPermission(PERMISSIONS.CAN_TRANSFER),
       (req, res) => this.transferChatGroup(req, res)
+    );
+
+    // Resolve chat group (mark as resolved) - requires end chat permission
+    router.patch("/:chatGroupId/resolve", 
+      checkPermission(PERMISSIONS.END_CHAT),
+      (req, res) => this.resolveChatGroup(req, res)
     );
 
     // Get chat messages for a specific client - requires message viewing permission
@@ -145,6 +157,93 @@ class ChatController {
   }
 
   /**
+   * Get resolved chat groups for the current user - Optimized
+   */
+  async getResolvedChatGroups(req, res) {
+    try {
+      const { userId } = req;
+
+      const groups = await chatService.getResolvedChatGroupsByUser(userId);
+
+      if (!groups || groups.length === 0) {
+        return res.json([]);
+      }
+
+      // Extract profile IDs and chat group IDs more efficiently
+      const profIds = [];
+      const chatGroupIds = [];
+
+      // Single pass to extract both arrays
+      groups.forEach((group) => {
+        chatGroupIds.push(group.chat_group_id);
+        if (group.client?.prof_id) {
+          profIds.push(group.client.prof_id);
+        }
+      });
+
+      // Get profile images and latest message times in parallel
+      const [imageMap, timeMap] = await Promise.all([
+        profIds.length > 0 ? chatService.getProfileImages(profIds) : Promise.resolve({}),
+        chatService.getLatestMessageTimes(chatGroupIds),
+      ]);
+
+      // Format response more efficiently
+      const formatted = groups.reduce((acc, group) => {
+        const client = group.client;
+        if (!client) return acc;
+
+        const fullName = client.profile
+          ? `${client.profile.prof_firstname} ${client.profile.prof_lastname}`.trim()
+          : "Unknown Client";
+
+        // Get latest message time or use current time as fallback
+        const latestTime = timeMap[group.chat_group_id];
+        const displayTime = latestTime
+          ? new Date(latestTime).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+          : new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+
+        acc.push({
+          sys_user_id: userId,
+          chat_group_id: group.chat_group_id,
+          chat_group_name: fullName,
+          department: group.department?.dept_name || "Unknown",
+          customer: {
+            id: client.client_id,
+            chat_group_id: group.chat_group_id,
+            name: fullName,
+            number: client.client_number,
+            profile: imageMap[client.prof_id] || null,
+            time: displayTime,
+            isAccepted: true,
+            sys_user_id: group.sys_user_id,
+            status: "resolved",
+          },
+          // Include raw timestamp for sorting
+          latestMessageTime: latestTime || new Date().toISOString(),
+        });
+
+        return acc;
+      }, []);
+
+      // Sort by latest message time (newest first) and remove the sorting field
+      const sortedFormatted = formatted
+        .sort((a, b) => new Date(b.latestMessageTime) - new Date(a.latestMessageTime))
+        .map(({ latestMessageTime, ...rest }) => rest);
+
+      res.json(sortedFormatted);
+    } catch (err) {
+      console.error("❌ Error fetching resolved chat groups:", err);
+      res.status(500).json({ error: "Failed to fetch resolved chat groups" });
+    }
+  }
+
+  /**
    * Transfer chat group to another department
    */
   async transferChatGroup(req, res) {
@@ -179,6 +278,37 @@ class ChatController {
       }
 
       res.status(500).json({ error: "Failed to transfer chat" });
+    }
+  }
+
+  /**
+   * Resolve chat group (mark as resolved)
+   */
+  async resolveChatGroup(req, res) {
+    try {
+      const { chatGroupId } = req.params;
+      const { userId } = req;
+
+      if (!chatGroupId) {
+        return res.status(400).json({
+          error: "Chat group ID is required"
+        });
+      }
+
+      const resolvedChat = await chatService.resolveChatGroup(chatGroupId, userId);
+
+      res.json({
+        success: true,
+        message: "Chat resolved successfully",
+        data: {
+          chat_group_id: resolvedChat.chat_group_id,
+          status: resolvedChat.status,
+          resolved_at: resolvedChat.resolved_at
+        }
+      });
+    } catch (err) {
+      console.error("❌ Error resolving chat:", err.message);
+      res.status(500).json({ error: "Failed to resolve chat" });
     }
   }
 

@@ -1,4 +1,6 @@
 const supabase = require('../../helpers/supabaseClient');
+const EVENTS = require('../constants/events');
+const { ResponseEmitter, BroadcastEmitter } = require('../emitters');
 
 /**
  * Agent Status Handler
@@ -9,6 +11,11 @@ class AgentStatusHandler {
     this.io = io;
     this.agentStatuses = new Map(); // In-memory storage for agent statuses
     this.rateLimits = new Map(); // Rate limiting for heartbeats
+    
+    // Global rate limiting to prevent DDoS
+    this.globalHeartbeatCount = 0;
+    this.globalHeartbeatWindow = Date.now();
+    this.GLOBAL_HEARTBEAT_LIMIT = 500; // Max 500 heartbeats per minute globally
   }
 
   /**
@@ -18,7 +25,7 @@ class AgentStatusHandler {
   async handleAgentOnline(socket, data) {
     try {
       if (!socket.isAuthenticated || !socket.user) {
-        socket.emit('agentStatusError', { error: 'Authentication required' });
+        socket.emit(EVENTS.AGENT_STATUS_ERROR, { error: 'Authentication required' });
         return;
       }
 
@@ -35,7 +42,7 @@ class AgentStatusHandler {
 
       if (error) {
         console.error('❌ Error fetching agent status:', error);
-        socket.emit('agentStatusError', { error: 'Failed to fetch agent status' });
+        ResponseEmitter.emitAgentStatusError(socket, 'Failed to fetch agent status');
         return;
       }
 
@@ -59,13 +66,8 @@ class AgentStatusHandler {
         })
         .eq('sys_user_id', userId);
 
-      // Broadcast status change
-      this.io.emit('agentStatusChanged', {
-        userId,
-        agentStatus,
-        userType,
-        lastSeen: now
-      });
+      // Broadcast status change to agents in same departments only
+      await this.broadcastStatusChangeToDepartments(userId, agentStatus, userType, now);
 
       console.log(`✅ Agent ${userId} (${userType}) is now ${agentStatus}`);
 
@@ -75,7 +77,7 @@ class AgentStatusHandler {
       }
     } catch (error) {
       console.error('❌ Error handling agent online:', error);
-      socket.emit('agentStatusError', { error: 'Failed to set agent status' });
+      ResponseEmitter.emitAgentStatusError(socket, 'Failed to set agent status');
     }
   }
 
@@ -91,7 +93,21 @@ class AgentStatusHandler {
       const userId = socket.user.userId;
       const now = new Date();
 
-      // Rate limiting: Only process heartbeat every 5 seconds
+      // Global rate limiting (prevent DDoS)
+      if (now - this.globalHeartbeatWindow > 60000) {
+        // Reset global counter every minute
+        this.globalHeartbeatCount = 0;
+        this.globalHeartbeatWindow = now;
+      }
+
+      if (this.globalHeartbeatCount >= this.GLOBAL_HEARTBEAT_LIMIT) {
+        console.warn('⚠️ Global heartbeat rate limit exceeded');
+        return;
+      }
+
+      this.globalHeartbeatCount++;
+
+      // Per-user rate limiting: Only process heartbeat every 5 seconds
       const lastHeartbeat = this.rateLimits.get(userId);
       if (lastHeartbeat && (now - lastHeartbeat) < 5000) {
         return; // Skip this heartbeat
@@ -107,7 +123,7 @@ class AgentStatusHandler {
       }
 
       // Acknowledge heartbeat
-      socket.emit('agentHeartbeatAck', { timestamp: now });
+      ResponseEmitter.emitAgentHeartbeatAck(socket, now);
     } catch (error) {
       console.error('❌ Error handling agent heartbeat:', error);
     }
@@ -135,7 +151,7 @@ class AgentStatusHandler {
   async handleUpdateAgentStatus(socket, data) {
     try {
       if (!socket.isAuthenticated || !socket.user) {
-        socket.emit('agentStatusError', { error: 'Authentication required' });
+        ResponseEmitter.emitAgentStatusError(socket, 'Authentication required');
         return;
       }
 
@@ -145,9 +161,7 @@ class AgentStatusHandler {
       // Validate status
       const validStatuses = ['accepting_chats', 'not_accepting_chats'];
       if (!agentStatus || !validStatuses.includes(agentStatus)) {
-        socket.emit('agentStatusError', { 
-          error: 'Invalid agent_status. Must be one of: accepting_chats, not_accepting_chats' 
-        });
+        ResponseEmitter.emitAgentStatusError(socket, 'Invalid agent_status. Must be one of: accepting_chats, not_accepting_chats');
         return;
       }
 
@@ -179,12 +193,8 @@ class AgentStatusHandler {
         })
         .eq('sys_user_id', userId);
 
-      // Broadcast status change
-      this.io.emit('agentStatusChanged', {
-        userId,
-        agentStatus,
-        lastSeen: now
-      });
+      // Broadcast status change to agents in same departments only
+      await this.broadcastStatusChangeToDepartments(userId, agentStatus, socket.user.userType, now);
 
       // If agent is now accepting chats, assign queued chats
       if (agentStatus === 'accepting_chats') {
@@ -192,10 +202,10 @@ class AgentStatusHandler {
       }
 
       console.log(`✅ Agent ${userId} status updated to ${agentStatus}`);
-      socket.emit('agentStatusUpdateSuccess', { agentStatus, timestamp: now });
+      ResponseEmitter.emitAgentStatusUpdateSuccess(socket, agentStatus, now);
     } catch (error) {
       console.error('❌ Error updating agent status:', error);
-      socket.emit('agentStatusError', { error: 'Failed to update agent status' });
+      ResponseEmitter.emitAgentStatusError(socket, 'Failed to update agent status');
     }
   }
 
@@ -246,12 +256,8 @@ class AgentStatusHandler {
       console.error('❌ Error updating agent offline status:', err);
     }
 
-    // Broadcast status change
-    this.io.emit('agentStatusChanged', {
-      userId,
-      agentStatus: 'offline',
-      lastSeen: now
-    });
+    // Broadcast status change to agents in same departments only
+    await this.broadcastStatusChangeToDepartments(userId, 'offline', 'agent', now);
 
     // Remove from in-memory storage
     this.agentStatuses.delete(userId);
@@ -267,7 +273,7 @@ class AgentStatusHandler {
   async handleGetAgentStatuses(socket) {
     try {
       if (!socket.isAuthenticated || !socket.user) {
-        socket.emit('agentStatusError', { error: 'Authentication required' });
+        socket.emit(EVENTS.AGENT_STATUS_ERROR, { error: 'Authentication required' });
         return;
       }
 
@@ -282,7 +288,7 @@ class AgentStatusHandler {
       
       if (deptError) {
         console.error('❌ Error fetching user departments:', deptError);
-        socket.emit('agentStatusError', { error: 'Failed to fetch departments' });
+        ResponseEmitter.emitAgentStatusError(socket, 'Failed to fetch departments');
         return;
       }
       
@@ -290,7 +296,7 @@ class AgentStatusHandler {
       
       if (departmentIds.length === 0) {
         console.log('⚠️ User has no departments, returning empty agent list');
-        socket.emit('agentStatusesList', {});
+        ResponseEmitter.emitAgentStatusesList(socket, {});
         return;
       }
       
@@ -302,7 +308,7 @@ class AgentStatusHandler {
       
       if (usersError) {
         console.error('❌ Error fetching department users:', usersError);
-        socket.emit('agentStatusError', { error: 'Failed to fetch department users' });
+        ResponseEmitter.emitAgentStatusError(socket, 'Failed to fetch department users');
         return;
       }
       
@@ -346,10 +352,10 @@ class AgentStatusHandler {
       }
       
       console.log(`📋 Returning ${Object.keys(agentStatuses).length} agent statuses for user ${requestingUserId}`);
-      socket.emit('agentStatusesList', agentStatuses);
+      ResponseEmitter.emitAgentStatusesList(socket, agentStatuses);
     } catch (error) {
       console.error('❌ Error handling get agent statuses:', error);
-      socket.emit('agentStatusError', { error: 'Failed to get agent statuses' });
+      ResponseEmitter.emitAgentStatusError(socket, 'Failed to get agent statuses');
     }
   }
 
@@ -482,6 +488,49 @@ class AgentStatusHandler {
       }
     } catch (error) {
       console.error('❌ Error assigning queued chats to new agent:', error);
+    }
+  }
+
+  /**
+   * Broadcast agent status change to agents in same departments only
+   * This is more efficient than broadcasting to all connected clients
+   * @param {number} userId - Agent user ID
+   * @param {string} agentStatus - New agent status
+   * @param {string} userType - User type (agent)
+   * @param {Date} lastSeen - Last seen timestamp
+   */
+  async broadcastStatusChangeToDepartments(userId, agentStatus, userType, lastSeen) {
+    try {
+      // Get the agent's departments
+      const { data: userDepartments, error } = await supabase
+        .from('sys_user_department')
+        .select('dept_id')
+        .eq('sys_user_id', userId);
+      
+      if (error) {
+        console.error('❌ Error fetching user departments for broadcast:', error);
+        return;
+      }
+      
+      const departmentIds = userDepartments?.map(d => d.dept_id) || [];
+      
+      if (departmentIds.length === 0) {
+        console.log('⚠️ Agent has no departments, skipping status broadcast');
+        return;
+      }
+      
+      // Broadcast to each department room
+      const statusData = {
+        userId,
+        agentStatus,
+        userType,
+        lastSeen
+      };
+      BroadcastEmitter.broadcastAgentStatusChanged(this.io, departmentIds, statusData);
+      
+      console.log(`📡 Broadcasted agent status to ${departmentIds.length} department(s): ${departmentIds.join(', ')}`);
+    } catch (error) {
+      console.error('❌ Error broadcasting status change to departments:', error);
     }
   }
 

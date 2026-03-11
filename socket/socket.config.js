@@ -1,7 +1,6 @@
 const socketIo = require('socket.io');
-const SocketAuthMiddleware = require('./middleware/socketAuth');
-const AgentStatusManager = require('./agentStatusManager');
-const RoomManagementService = require('./services/roomManagementService');
+const SocketAuthMiddleware = require('./middleware/socket.auth');
+const AgentStatusManager = require('./agent-status.manager');
 const { ChatGroupNotifier } = require('./notifications');
 
 // Import handlers
@@ -112,25 +111,62 @@ class SocketConfig {
       // Register chat events
       this.chatEvents.register(socket);
 
-      // Handle user coming online - join department rooms for agents
-      socket.on('userOnline', async (data) => {
-        // Join department rooms for agents
-        if (socket.user && socket.user.userType === 'agent') {
-          await RoomManagementService.joinDepartmentRooms(socket);
-          
-          // Also handle agent online status
-          await this.agentStatusHandler.handleAgentOnline(socket, data);
-        }
-      });
+      // agentOnline event is handled in agentStatusEvents.js
 
       // Disconnection
-      socket.on('disconnect', async () => {
+      socket.on('disconnect', async (reason) => {
+        const disconnectInfo = {
+          socketId: socket.id,
+          userId: socket.user?.userId,
+          userType: socket.user?.userType,
+          clientType: socket.clientType,
+          reason: reason,
+          timestamp: new Date().toISOString()
+        };
+        
+        console.log(`🔌 Socket disconnected:`, disconnectInfo);
+        
+        // Handle different disconnect reasons
+        switch (reason) {
+          case 'io server disconnect':
+            // Server forcefully disconnected (auth failure, manual kick)
+            console.log(`🚨 Server initiated disconnect for ${socket.id}`);
+            break;
+            
+          case 'io client disconnect':
+            // Client called socket.disconnect()
+            console.log(`ℹ️ Client initiated disconnect for ${socket.id}`);
+            break;
+            
+          case 'ping timeout':
+            // Client didn't respond to ping in time
+            console.warn(`⏱️ Ping timeout for ${socket.id} - client unresponsive`);
+            break;
+            
+          case 'transport close':
+            // Underlying connection closed (network issue, server restart)
+            console.warn(`🔌 Transport closed for ${socket.id} - network issue or server restart`);
+            break;
+            
+          case 'transport error':
+            // Transport error occurred
+            console.error(`❌ Transport error for ${socket.id}`);
+            break;
+            
+          default:
+            console.log(`❓ Unknown disconnect reason for ${socket.id}: ${reason}`);
+        }
+        
         // Handle agent disconnect (don't set offline, just update last_seen)
         if (socket.user && socket.user.userType === 'agent') {
           await this.agentStatusHandler.handleAgentDisconnect(socket);
         }
         
+        // Handle chat room cleanup
         this.chatRoomHandler.handleDisconnect(socket);
+        
+        // CRITICAL: Clean up all event listeners to prevent memory leaks
+        socket.removeAllListeners();
       });
     });
   }

@@ -2,6 +2,8 @@
  * Chat Event Handlers
  * Handles all chat-related socket events (join, leave, typing, messages)
  */
+const EVENTS = require('../constants/events');
+
 class ChatEvents {
   constructor(chatHandler, typingHandler, messageHandler) {
     this.chatHandler = chatHandler;
@@ -15,29 +17,29 @@ class ChatEvents {
    */
   register(socket) {
     // Chat room events
-    socket.on('joinChatGroup', async (data) => {
+    socket.on(EVENTS.JOIN_CHAT_GROUP, async (data) => {
       await this.chatHandler.handleJoinChatGroup(socket, data);
     });
 
-    socket.on('leavePreviousRoom', () => {
+    socket.on(EVENTS.LEAVE_PREVIOUS_ROOM, () => {
       this.chatHandler.handleLeavePreviousRoom(socket);
     });
 
-    socket.on('leaveRoom', (data) => {
+    socket.on(EVENTS.LEAVE_ROOM, (data) => {
       this.chatHandler.handleLeaveRoom(socket, data);
     });
 
     // Typing events
-    socket.on('typing', async (data) => {
+    socket.on(EVENTS.TYPING, async (data) => {
       await this.typingHandler.handleTyping(socket, data);
     });
 
-    socket.on('stopTyping', (data) => {
+    socket.on(EVENTS.STOP_TYPING, (data) => {
       this.typingHandler.handleStopTyping(socket, data);
     });
 
     // Message events
-    socket.on('sendMessage', async (messageData) => {
+    socket.on(EVENTS.SEND_MESSAGE, async (messageData) => {
       await this.messageHandler.handleSendMessage(socket, messageData);
     });
   }

@@ -3,8 +3,8 @@
  * Exports all notification modules for easier imports
  */
 
-const AgentNotifier = require('./agentNotifier');
-const ChatGroupNotifier = require('./chatGroupNotifier');
+const AgentNotifier = require('./agent.notifier');
+const ChatGroupNotifier = require('./chat-group.notifier');
 
 module.exports = {
   AgentNotifier,

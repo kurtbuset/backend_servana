@@ -61,7 +61,35 @@ async function startServer() {
       }, 5 * 60 * 1000);
     } else {
       console.log('⚠️ Server starting without cache (Redis unavailable)');
-    } 
+    }
+    
+    // Memory monitoring
+    setInterval(() => {
+      const memoryUsage = process.memoryUsage();
+      const heapUsedMB = Math.round(memoryUsage.heapUsed / 1024 / 1024);
+      const heapTotalMB = Math.round(memoryUsage.heapTotal / 1024 / 1024);
+      
+      console.log(`💾 Memory: ${heapUsedMB}MB / ${heapTotalMB}MB`);
+      
+      // Alert if memory usage is high
+      if (memoryUsage.heapUsed > 500 * 1024 * 1024) { // 500MB
+        console.error('🔴 HIGH MEMORY USAGE:', {
+          heapUsed: `${heapUsedMB}MB`,
+          heapTotal: `${heapTotalMB}MB`,
+          rss: `${Math.round(memoryUsage.rss / 1024 / 1024)}MB`
+        });
+      }
+    }, 60000); // Check every minute
+    
+    // Socket connection monitoring
+    setInterval(() => {
+      const socketCount = io.sockets.sockets.size;
+      console.log(`🔌 Active sockets: ${socketCount}`);
+      
+      if (socketCount > 1000) {
+        console.warn('⚠️ High socket connection count:', socketCount);
+      }
+    }, 60000); // Check every minute
     
     // Start the server on all network interfaces (0.0.0.0)
     server.listen(port, '0.0.0.0', () => {
