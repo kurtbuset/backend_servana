@@ -69,12 +69,31 @@ class ProfileController {
                 priv_can_use_canned_mess,
                 priv_can_end_chat,
                 priv_can_transfer,
+                priv_can_view_dept,
+                priv_can_add_dept,
+                priv_can_edit_dept,
                 priv_can_manage_dept,
                 priv_can_assign_dept,
                 priv_can_manage_role,
                 priv_can_assign_role,
                 priv_can_create_account,
-                priv_can_manage_auto_reply
+                priv_can_view_auto_reply,
+                priv_can_add_auto_reply,
+                priv_can_edit_auto_reply,
+                priv_can_delete_auto_reply,
+                priv_can_manage_auto_reply,
+                priv_can_view_macros,
+                priv_can_add_macros,
+                priv_can_edit_macros,
+                priv_can_delete_macros,
+                priv_can_view_change_roles,
+                priv_can_edit_change_roles,
+                priv_can_view_manage_agents,
+                priv_can_view_agents_info,
+                priv_can_create_agent_account,
+                priv_can_edit_manage_agents,
+                priv_can_edit_dept_manage_agents,
+                priv_can_view_analytics_manage_agents
               `)
               .eq("priv_id", roleData.priv_id)
               .single();

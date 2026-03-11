@@ -11,32 +11,37 @@ class DepartmentController {
     // Apply authentication middleware to all routes
     router.use(getCurrentUser);
 
-    // Get all departments - requires department management permission
-    router.get("/", checkAnyPermission([PERMISSIONS.MANAGE_ROLE, PERMISSIONS.VIEW_MESSAGE]),
+    // Get all departments - requires view department permission
+    router.get("/", checkPermission(PERMISSIONS.VIEW_DEPT),
       (req, res) => this.getAllDepartments(req, res)
     );
 
-    // Add a new department - requires department management permission
+    // Add a new department - requires add department permission
     router.post("/", 
-      checkPermission(PERMISSIONS.MANAGE_DEPT),
+      checkPermission(PERMISSIONS.ADD_DEPT),
       (req, res) => this.createDepartment(req, res)
     );
 
-    // Update an existing department - requires department management permission
+    // Update an existing department - requires edit department permission
     router.put("/:id", 
-      checkPermission(PERMISSIONS.MANAGE_DEPT),
+      checkPermission(PERMISSIONS.EDIT_DEPT),
       (req, res) => this.updateDepartment(req, res)
     );
 
-    // Toggle dept_is_active status - requires department management permission
+    // Toggle dept_is_active status - requires edit department permission
     router.put("/:id/toggle", 
-      checkPermission(PERMISSIONS.MANAGE_DEPT),
+      checkPermission(PERMISSIONS.EDIT_DEPT),
       (req, res) => this.toggleDepartmentStatus(req, res)
     );
 
     // Get members of a department - public api endpoint
     router.get("/:id/members", 
       (req, res) => this.getDepartmentMembers(req, res)
+    );
+
+    // View department members - any authenticated user can view (for department panel)
+    router.get("/:id/view-members", 
+      (req, res) => this.viewDepartmentMembers(req, res)
     );
 
     return router;
@@ -131,6 +136,23 @@ class DepartmentController {
     } catch (err) {
       console.error("Error fetching department members:", err.message);
       res.status(500).json({ error: "Failed to fetch department members" });
+    }
+  }
+
+  /**
+   * View department members - public endpoint for any authenticated user
+   * Used by department panel to show team members
+   */
+  async viewDepartmentMembers(req, res) {
+    try {
+      const { id } = req.params;
+
+      const members = await departmentService.getDepartmentMembers(id);
+
+      res.status(200).json({ members });
+    } catch (err) {
+      console.error("Error viewing department members:", err.message);
+      res.status(500).json({ error: "Failed to view department members" });
     }
   }
 }

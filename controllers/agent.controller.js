@@ -11,27 +11,27 @@ class AgentController {
     // Apply authentication middleware to all routes
     router.use(getCurrentUser);
 
-    // Fetch all agents with their departments - requires role management permission
+    // Fetch all agents with their departments - requires view manage agents permission
     router.get("/agents", 
-      checkAnyPermission([PERMISSIONS.MANAGE_ROLE, PERMISSIONS.CREATE_ACCOUNT]),
+      checkPermission(PERMISSIONS.VIEW_MANAGE_AGENTS),
       (req, res) => this.getAllAgents(req, res)
     );
 
-    // Fetch all departments - requires department management permission
+    // Fetch all departments - requires view department permission
     router.get("/departments", 
-      checkPermission(PERMISSIONS.MANAGE_DEPT),
+      checkPermission(PERMISSIONS.VIEW_DEPT),
       (req, res) => this.getActiveDepartments(req, res)
     );
 
-    // Update agent - requires role management permission
+    // Update agent - requires edit manage agents permission
     router.put("/agents/:id", 
-      checkPermission(PERMISSIONS.MANAGE_ROLE),
+      checkPermission(PERMISSIONS.EDIT_MANAGE_AGENTS),
       (req, res) => this.updateAgent(req, res)
     );
 
-    // Create agent - requires account creation permission
+    // Create agent - requires create agent account permission
     router.post("/agents", 
-      checkPermission(PERMISSIONS.CREATE_ACCOUNT),
+      checkPermission(PERMISSIONS.CREATE_AGENT_ACCOUNT),
       (req, res) => this.createAgent(req, res)
     );
 

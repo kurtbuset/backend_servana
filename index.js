@@ -94,9 +94,10 @@ async function startServer() {
     // Start the server on all network interfaces (0.0.0.0)
     server.listen(port, '0.0.0.0', () => {
       console.log(`🚀 Server running on port ${port}`);
-      // console.log(`🌐 Server accessible at:`);
-      // console.log(`   - Local: http://localhost:${port}`);
-      // console.log(`   - Network: http://192.168.137.53:${port}`);
+      console.log(`🌐 Server accessible at:`);
+      console.log(`   - Local: http://localhost:${port}`);
+      console.log(`   - Network (Wi-Fi): http://192.168.137.77:${port}`);
+      console.log(`   - Network (LAN): http://10.120.60.81:${port}`);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);

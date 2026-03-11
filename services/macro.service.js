@@ -106,6 +106,26 @@ class MacroService {
       department: data.department?.dept_name || "All",
     };
   }
+
+  /**
+   * Delete an existing macro
+   */
+  async deleteMacro(macroId) {
+    const { data, error } = await supabase
+      .from("canned_message")
+      .delete()
+      .eq("canned_id", macroId)
+      .select("canned_id")
+      .single();
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      message: "Macro deleted successfully",
+      id: data.canned_id,
+    };
+  }
 }
 
 module.exports = new MacroService();

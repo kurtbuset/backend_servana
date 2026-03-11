@@ -10,21 +10,21 @@ class ChangeRoleController {
 
     router.use(getCurrentUser);
 
-    // Get all users with their roles - requires role assignment permission
+    // Get all users with their roles - requires view change roles permission
     router.get("/", 
-      checkPermission(PERMISSIONS.ASSIGN_ROLE),
+      checkPermission(PERMISSIONS.VIEW_CHANGE_ROLES),
       (req, res) => this.getAllUsersWithRoles(req, res)
     );
 
-    // Get all roles (active + inactive) - requires role assignment permission
+    // Get all roles (active + inactive) - requires view change roles permission
     router.get("/roles", 
-      checkPermission(PERMISSIONS.ASSIGN_ROLE),
+      checkPermission(PERMISSIONS.VIEW_CHANGE_ROLES),
       (req, res) => this.getAllRoles(req, res)
     );
 
-    // Update a user's role or active status - requires role assignment permission
+    // Update a user's role or active status - requires edit change roles permission
     router.put("/:id", 
-      checkPermission(PERMISSIONS.ASSIGN_ROLE),
+      checkPermission(PERMISSIONS.EDIT_CHANGE_ROLES),
       (req, res) => this.updateUserRole(req, res)
     );
 
