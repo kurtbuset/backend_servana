@@ -45,21 +45,51 @@ class AgentStatusService {
   }
 
   /**
-   * Broadcast agent status change via Socket.IO
+   * Broadcast agent status change via Socket.IO to agents in same departments
+   * More efficient than broadcasting to all clients
    * @param {Object} io - Socket.IO instance
    * @param {number} userId - Agent user ID
    * @param {string} status - New agent status
    */
-  broadcastStatusChange(io, userId, status) {
+  async broadcastStatusChange(io, userId, status) {
     if (!io) return;
 
-    io.emit('agentStatusChanged', {
-      userId,
-      agent_status: status,
-      timestamp: new Date()
-    });
-
-    console.log(`📡 Broadcasted agent status change: ${userId} -> ${status}`);
+    const supabase = require('../helpers/supabaseClient');
+    
+    try {
+      // Get the agent's departments
+      const { data: userDepartments, error } = await supabase
+        .from('sys_user_department')
+        .select('dept_id')
+        .eq('sys_user_id', userId);
+      
+      if (error) {
+        console.error('❌ Error fetching user departments for broadcast:', error);
+        return;
+      }
+      
+      const departmentIds = userDepartments?.map(d => d.dept_id) || [];
+      
+      if (departmentIds.length === 0) {
+        console.log('⚠️ Agent has no departments, skipping status broadcast');
+        return;
+      }
+      
+      // Broadcast to each department room
+      const statusData = {
+        userId,
+        agent_status: status,
+        timestamp: new Date()
+      };
+      
+      departmentIds.forEach(deptId => {
+        io.to(`department_${deptId}`).emit('agentStatusChanged', statusData);
+      });
+      
+      console.log(`📡 Broadcasted agent status to ${departmentIds.length} department(s): ${departmentIds.join(', ')}`);
+    } catch (error) {
+      console.error('❌ Error broadcasting status change:', error);
+    }
   }
 
   /**

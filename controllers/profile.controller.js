@@ -220,27 +220,6 @@ class ProfileController {
       res.status(500).json({ error: "Server error fetching agent status" });
     }
   }
-
-  /**
-   * Update agent status
-   * @deprecated Use Socket.IO event 'updateAgentStatus' instead
-   */
-  async updateAgentStatus(req, res) {
-    try {
-      res.status(410).json({ 
-        error: "This endpoint is deprecated. Use Socket.IO event 'updateAgentStatus' instead.",
-        message: "Agent status updates are now handled via Socket.IO for real-time synchronization."
-      });
-    } catch (err) {
-      console.error("Error in deprecated updateAgentStatus:", err.message);
-      
-      if (err.message.includes('Invalid agent_status')) {
-        return res.status(400).json({ error: err.message });
-      }
-      
-      res.status(500).json({ error: "Server error updating agent status" });
-    }
-  }
 }
 
 module.exports = new ProfileController();

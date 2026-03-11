@@ -1,5 +1,7 @@
 const supabase = require('../../helpers/supabaseClient');
-const AuthUtils = require('./authUtils');
+const AuthUtils = require('./auth.utils');
+const EVENTS = require('../constants/events');
+const { ResponseEmitter } = require('../emitters');
 
 /**
  * Web Socket Authentication
@@ -198,7 +200,7 @@ class WebSocketAuth {
         const refreshed = await this.refreshToken(refreshToken);
         
         // Emit new token to client so they can update cookies
-        socket.emit('token_refresh_required', {
+        ResponseEmitter.emitTokenRefreshRequired(socket, {
           access_token: refreshed.access_token,
           refresh_token: refreshed.refresh_token,
           expires_at: refreshed.expires_at

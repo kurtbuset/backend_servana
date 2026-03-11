@@ -1,6 +1,6 @@
-const chatGroupHelper = require('../helpers/chatGroupHelper');
-const clientHelper = require('../helpers/clientHelper');
-const AgentNotifier = require('../notifications/agentNotifier');
+const chatGroupHelper = require('../helpers/chat-group.helper');
+const clientHelper = require('../helpers/client.helper');
+const AgentNotifier = require('../notifications/agent.notifier');
 
 /**
  * Customer List Service

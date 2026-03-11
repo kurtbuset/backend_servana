@@ -94,6 +94,53 @@ class ChatService {
   }
 
   /**
+   * Get resolved chat groups for a user
+   */
+  async getResolvedChatGroupsByUser(userId) {
+    try {
+      // Cache key for resolved chats
+      const cacheKey = `user_resolved_chat_groups_${userId}`;
+      let groups = await cacheService.cache.get('CHAT_GROUP', cacheKey);
+      
+      if (!groups) {
+        // Cache miss - fetch from database
+        const { data, error } = await supabase
+          .from("chat_group")
+          .select(`
+            chat_group_id,
+            dept_id,
+            sys_user_id,
+            status,
+            department:department(dept_name),
+            client:client!chat_group_client_id_fkey(
+              client_id,
+              client_number,
+              prof_id,
+              profile:profile(
+                prof_firstname,
+                prof_lastname
+              )
+            )
+          `)
+          .eq("status", "resolved")
+          .eq("sys_user_id", userId);
+
+        if (error) throw error;
+        
+        groups = data || [];
+        
+        // Cache for 5 minutes
+        await cacheService.cache.set('CHAT_GROUP', cacheKey, groups, 300);
+      }
+      
+      return groups;
+    } catch (error) {
+      console.error('❌ Error fetching resolved chat groups:', error.message);
+      return [];
+    }
+  }
+
+  /**
    * Get profile images for multiple profile IDs - Optimized single query
    */
   async getProfileImages(profIds) {
@@ -459,6 +506,42 @@ class ChatService {
       return data;
     } catch (error) {
       console.error('❌ Error transferring chat group:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Resolve chat group (mark as resolved)
+   */
+  async resolveChatGroup(chatGroupId, userId) {
+    try {
+      const { data, error } = await supabase
+        .from("chat_group")
+        .update({
+          status: "resolved"
+        })
+        .eq("chat_group_id", chatGroupId)
+        .eq("sys_user_id", userId) // Ensure only the assigned user can resolve
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      if (!data) {
+        throw new Error("Chat group not found or you don't have permission to resolve it");
+      }
+
+      // Invalidate related caches
+      await cacheService.invalidateChatGroup(chatGroupId);
+      await cacheService.invalidateChatMessages(chatGroupId);
+      
+      // Invalidate user's chat groups cache
+      const userCacheKey = `user_chat_groups_${userId}`;
+      await cacheService.cache.delete('CHAT_GROUP', userCacheKey);
+
+      return data;
+    } catch (error) {
+      console.error('❌ Error resolving chat group:', error.message);
       throw error;
     }
   }

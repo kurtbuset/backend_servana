@@ -1,5 +1,5 @@
 const supabase = require('../../helpers/supabaseClient');
-const AuthUtils = require('./authUtils');
+const AuthUtils = require('./auth.utils');
 const jwtUtils = require('../../utils/jwt');
 
 /**

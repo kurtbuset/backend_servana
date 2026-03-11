@@ -1,7 +1,9 @@
-const WebSocketAuth = require('./webSocketAuth');
-const MobileSocketAuth = require('./mobileSocketAuth');
-const AuthUtils = require('./authUtils');
-const securityLogger = require('../security/securityLogger');
+const WebSocketAuth = require('./web-socket.auth');
+const MobileSocketAuth = require('./mobile-socket.auth');
+const AuthUtils = require('./auth.utils');
+const securityLogger = require('../security/security.logger');
+const EVENTS = require('../constants/events');
+const { ResponseEmitter } = require('../emitters');
 
 /**
  * Main Socket Authentication Middleware
@@ -130,15 +132,10 @@ class SocketAuthMiddleware {
    * Set up session management for authenticated socket
    */
   setupSessionManagement(socket) {
-    // 1. Set up token refresh timer for web clients
     if (socket.clientType === 'web' && socket.user.token) {
       this.scheduleTokenValidation(socket);
     }
     
-    // 2. Set up heartbeat monitoring
-    this.setupHeartbeat(socket);
-    
-    // 3. Handle disconnection cleanup
     socket.on('disconnect', (reason) => {
       this.cleanupSession(socket, reason);
     });
@@ -160,10 +157,7 @@ class SocketAuthMiddleware {
           
           if (refreshed) {
             console.log(`✅ Token refreshed successfully for socket ${socket.id}`);
-            socket.emit('token_refreshed', { 
-              message: 'Your session has been automatically renewed',
-              expires_at: refreshed.expires_at
-            });
+            ResponseEmitter.emitTokenRefreshed(socket, 'Your session has been automatically renewed', refreshed.expires_at);
             return; // Skip validation since we just refreshed
           }
         }
@@ -182,18 +176,12 @@ class SocketAuthMiddleware {
         
         if (isWithinGracePeriod) {
           console.log(`⏰ Token expired but within grace period for socket ${socket.id}`);
-          socket.emit('token_expiring', { 
-            message: 'Your session is expiring. Please refresh to continue.',
-            grace_period_seconds: 120
-          });
+          ResponseEmitter.emitTokenExpiring(socket, 'Your session is expiring. Please refresh to continue.', 120);
           return; // Don't disconnect yet
         }
         
         // Grace period expired, disconnect
-        socket.emit('session_expired', { 
-          reason: 'Token validation failed',
-          message: 'Your session has expired. Please log in again.'
-        });
+        ResponseEmitter.emitSessionExpired(socket, 'Token validation failed', 'Your session has expired. Please log in again.');
         socket.disconnect(true);
       }
     }, 5 * 60 * 1000); // 5 minutes
@@ -263,10 +251,7 @@ class SocketAuthMiddleware {
           // Update socket user context with new token
           socket.user.token = refreshed.access_token;
           // Emit new token to mobile client
-          socket.emit('new_token', {
-            access_token: refreshed.access_token,
-            expires_at: refreshed.expires_at
-          });
+          ResponseEmitter.emitNewToken(socket, refreshed.access_token, refreshed.expires_at);
           return refreshed;
         }
       }
@@ -278,42 +263,31 @@ class SocketAuthMiddleware {
     }
   }
 
-  /**
-   * Set up heartbeat monitoring
-   */
-  setupHeartbeat(socket) {
-    socket.lastHeartbeat = new Date();
-    
-    socket.on('heartbeat', () => {
-      socket.lastHeartbeat = new Date();
-    });
-    
-    // Check for stale connections every 2 minutes
-    const heartbeatCheck = setInterval(() => {
-      const now = new Date();
-      const timeSinceLastHeartbeat = now - socket.lastHeartbeat;
-      
-      // Disconnect if no heartbeat for 10 minutes
-      if (timeSinceLastHeartbeat > 10 * 60 * 1000) {
-        socket.disconnect(true);
-      }
-    }, 2 * 60 * 1000); // Check every 2 minutes
-    
-    socket.heartbeatInterval = heartbeatCheck;
-  }
+
 
   /**
    * Clean up session on disconnect
    */
   cleanupSession(socket, reason) {
-    // Clear intervals
+    const sessionInfo = {
+      socketId: socket.id,
+      userId: socket.user?.userId,
+      userType: socket.user?.userType,
+      clientType: socket.clientType,
+      sessionDuration: socket.authenticatedAt ? Date.now() - socket.authenticatedAt.getTime() : 0,
+      reason: reason
+    };
+    
+    console.log(`🧹 Cleaning up session:`, sessionInfo);
+    
+    // Clear token validation interval
     if (socket.tokenValidationInterval) {
       clearInterval(socket.tokenValidationInterval);
+      socket.tokenValidationInterval = null;
     }
     
-    if (socket.heartbeatInterval) {
-      clearInterval(socket.heartbeatInterval);
-    }
+    // Store user info for logging before clearing
+    const userForLogging = socket.user ? { ...socket.user } : {};
     
     // Clear user context and authentication state
     socket.user = null;
@@ -323,7 +297,10 @@ class SocketAuthMiddleware {
     socket.chatGroupId = null;
     
     // Log disconnection
-    securityLogger.logAuthEvent('disconnect', socket.id, socket.user || {}, { reason });
+    securityLogger.logAuthEvent('disconnect', socket.id, userForLogging, { 
+      reason,
+      sessionDuration: sessionInfo.sessionDuration
+    });
   }
 
   /**

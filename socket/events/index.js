@@ -3,8 +3,8 @@
  * Exports all event handlers
  */
 
-const ChatEvents = require('./chatEvents');
-const AgentStatusEvents = require('./agentStatusEvents');
+const ChatEvents = require('./chat.events');
+const AgentStatusEvents = require('./agent-status.events');
 
 module.exports = {
   ChatEvents,
