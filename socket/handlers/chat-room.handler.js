@@ -1,4 +1,6 @@
-const RoomAccess = require('../authorization/roomAccess');
+const RoomAccess = require('../authorization/room.access');
+const EVENTS = require('../constants/events');
+const { ResponseEmitter, BroadcastEmitter } = require('../emitters');
 
 /**
  * Chat Room Handler
@@ -19,17 +21,14 @@ class ChatRoomHandler {
       
       // Validate that socket is authenticated
       if (!socket.isAuthenticated || !socket.user) {
-        socket.emit('error', { message: 'Authentication required' });
+        ResponseEmitter.emitError(socket, 'Authentication required');
         return;
       }
 
       // Check room access authorization
       const roomAccess = await this.roomAccess.canJoinRoom(socket.user, groupId);
       if (!roomAccess.allowed) {
-        socket.emit('error', { 
-          message: 'Access denied', 
-          reason: roomAccess.reason 
-        });
+        ResponseEmitter.emitError(socket, 'Access denied', roomAccess.reason);
         return;
       }
 
@@ -38,11 +37,7 @@ class ChatRoomHandler {
         socket.leave(String(socket.chatGroupId));
         
         // Notify previous room that agent left
-        socket.to(String(socket.chatGroupId)).emit('userLeft', {
-          userType: socket.user.userType,
-          userId: socket.user.userId,
-          chatGroupId: socket.chatGroupId
-        });
+        BroadcastEmitter.broadcastUserLeft(socket, String(socket.chatGroupId), socket.user.userType, socket.user.userId, socket.chatGroupId);
       }
       
       // Join new room
@@ -50,23 +45,13 @@ class ChatRoomHandler {
       socket.chatGroupId = groupId;
       
       // Notify new room that user joined
-      socket.to(String(groupId)).emit('userJoined', {
-        userType: socket.user.userType,
-        userId: socket.user.userId,
-        chatGroupId: groupId
-      });
+      BroadcastEmitter.broadcastUserJoined(socket, String(groupId), socket.user.userType, socket.user.userId, groupId);
 
       // Send success confirmation
-      socket.emit('joinedRoom', {
-        chatGroupId: groupId,
-        roomInfo: roomAccess.roomInfo
-      });
+      ResponseEmitter.emitJoinedRoom(socket, groupId, roomAccess.roomInfo);
     } catch (error) {
       console.error('❌ Error in handleJoinChatGroup:', error.message);
-      socket.emit('error', { 
-        message: 'Failed to join chat group',
-        details: error.message 
-      });
+      ResponseEmitter.emitError(socket, 'Failed to join chat group', error.message);
     }
   }
 
@@ -75,7 +60,7 @@ class ChatRoomHandler {
    */
   handleLeavePreviousRoom(socket) {
     if (!socket.isAuthenticated || !socket.user) {
-      socket.emit('error', { message: 'Authentication required' });
+      ResponseEmitter.emitError(socket, 'Authentication required');
       return;
     }
 
@@ -83,11 +68,7 @@ class ChatRoomHandler {
       socket.leave(String(socket.chatGroupId));
       
       // Notify room that user left
-      socket.to(String(socket.chatGroupId)).emit('userLeft', {
-        userType: socket.user.userType,
-        userId: socket.user.userId,
-        chatGroupId: socket.chatGroupId
-      });
+      BroadcastEmitter.broadcastUserLeft(socket, String(socket.chatGroupId), socket.user.userType, socket.user.userId, socket.chatGroupId);
       
       // Clear room info from socket
       socket.chatGroupId = null;
@@ -116,11 +97,7 @@ class ChatRoomHandler {
     socket.leave(String(roomId));
     
     // Notify room that user left with proper user info
-    socket.to(String(roomId)).emit('userLeft', {
-      userType: userType,
-      userId: userId,
-      chatGroupId: roomId
-    });
+    BroadcastEmitter.broadcastUserLeft(socket, String(roomId), userType, userId, roomId);
   }
 
   /**
@@ -129,11 +106,7 @@ class ChatRoomHandler {
   handleDisconnect(socket) {
     // Notify room members about user leaving
     if (socket.chatGroupId && socket.userType) {
-      socket.to(String(socket.chatGroupId)).emit('userLeft', {
-        userType: socket.userType,
-        userId: socket.userId,
-        chatGroupId: socket.chatGroupId
-      });
+      BroadcastEmitter.broadcastUserLeft(socket, String(socket.chatGroupId), socket.userType, socket.userId, socket.chatGroupId);
     }
   }
 }

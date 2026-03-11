@@ -1,4 +1,4 @@
-const SocketConfig = require('./socketConfig');
+const SocketConfig = require('./socket.config');
 
 /**
  * Socket module entry point

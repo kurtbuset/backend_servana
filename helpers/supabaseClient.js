@@ -11,6 +11,22 @@ else{
   console.log('Supabase credentials loaded successfully');
 }
 
+// Production-ready configuration with connection pooling
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
+  db: {
+    pool: {
+      min: 2,
+      max: 10  // Adjust based on your Supabase plan (free tier: 60 connections)
+    }
+  },
+  auth: {
+    persistSession: false  // Server-side doesn't need session persistence
+  },
+  global: {
+    headers: {
+      'x-application-name': 'servana-backend'
+    }
+  }
+});
 
-const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 module.exports = supabase;

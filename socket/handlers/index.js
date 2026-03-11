@@ -3,10 +3,10 @@
  * Exports all handler modules
  */
 
-const ChatRoomHandler = require('./chatRoomHandler');
-const TypingHandler = require('./typingHandler');
-const MessageHandler = require('./messageHandler');
-const AgentStatusHandler = require('./agentStatusHandler');
+const ChatRoomHandler = require('./chat-room.handler');
+const TypingHandler = require('./typing.handler');
+const MessageHandler = require('./message.handler');
+const AgentStatusHandler = require('./agent-status.handler');
 
 module.exports = {
   ChatRoomHandler,

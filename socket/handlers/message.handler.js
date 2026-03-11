@@ -1,6 +1,8 @@
 const chatController = require('../../controllers/chat.controller');
-const MessageAuth = require('../authorization/messageAuth');
-const CustomerListService = require('../services/customerListService');
+const MessageAuth = require('../authorization/message.auth');
+const CustomerListService = require('../services/customer-list.service');
+const EVENTS = require('../constants/events');
+const { ResponseEmitter, BroadcastEmitter } = require('../emitters');
 
 /**
  * Message Handler
@@ -20,9 +22,9 @@ class MessageHandler {
     try {
       // Validate authentication
       if (!socket.isAuthenticated || !socket.user) {
-        socket.emit('messageError', { 
-          error: 'Authentication required',
-          tempId: messageData.tempId 
+        ResponseEmitter.emitMessageError(socket, 'Authentication required', {
+          chat_group_id: messageData.chat_group_id,
+          tempId: messageData.tempId
         });
         return;
       }
@@ -31,10 +33,10 @@ class MessageHandler {
       const authResult = await this.messageAuth.authorizeSendMessage(socket.user, messageData);
       
       if (!authResult.authorized) {
-        socket.emit('messageError', { 
-          error: 'Message authorization failed',
-          details: authResult.reason,
-          tempId: messageData.tempId 
+        ResponseEmitter.emitMessageError(socket, 'Message authorization failed', {
+          chat_group_id: messageData.chat_group_id,
+          tempId: messageData.tempId,
+          details: authResult.reason
         });
         return;
       }
@@ -66,10 +68,10 @@ class MessageHandler {
         };
         
         // Broadcast to room
-        this.io.to(roomId).emit('receiveMessage', broadcastMessage);
+        BroadcastEmitter.broadcastMessage(this.io, roomId, broadcastMessage);
         
         // Send delivery confirmation to sender
-        socket.emit('messageDelivered', {
+        ResponseEmitter.emitMessageDelivered(socket, {
           chat_id: savedMessage.chat_id,
           chat_group_id: messageData.chat_group_id,
           timestamp: savedMessage.chat_created_at,
@@ -81,11 +83,10 @@ class MessageHandler {
       }
     } catch (error) {
       console.error('❌ Error handling sendMessage:', error);
-      socket.emit('messageError', { 
-        error: 'Failed to send message',
-        details: error.message,
+      ResponseEmitter.emitMessageError(socket, 'Failed to send message', {
         chat_group_id: messageData.chat_group_id,
-        tempId: messageData.tempId
+        tempId: messageData.tempId,
+        details: error.message
       });
     }
   }

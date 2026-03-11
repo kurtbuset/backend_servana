@@ -1,3 +1,5 @@
+const { BroadcastEmitter } = require('../emitters');
+
 /**
  * Typing Handler
  * Handles typing indicator events
@@ -27,7 +29,7 @@ class TypingHandler {
     }
     
     // Broadcast to all users in the chat group except sender
-    socket.to(roomId).emit('typing', {
+    BroadcastEmitter.broadcastTyping(socket, roomId, {
       chatGroupId,
       userName: userName || 'Someone',
       userId,
@@ -43,7 +45,7 @@ class TypingHandler {
     const { chatGroupId, userId, userType } = data;
     const roomId = String(chatGroupId);
     
-    socket.to(roomId).emit('stopTyping', {
+    BroadcastEmitter.broadcastStopTyping(socket, roomId, {
       chatGroupId,
       userId,
       userType: userType || socket.user?.userType || 'unknown',

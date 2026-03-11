@@ -1,4 +1,4 @@
-const RoomAccess = require('./roomAccess');
+const RoomAccess = require('./room.access');
 const cacheService = require('../../services/cache.service');
 
 /**
