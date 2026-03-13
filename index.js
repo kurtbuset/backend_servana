@@ -5,7 +5,7 @@ const cookieParser = require('cookie-parser');
 const http = require('http');
 require('dotenv').config();
 
-const { initializeSocket } = require('./socket');
+const { initializeSocket } = require('./socket-simple');
 const { setupRoutes } = require('./routes');
 const { getCorsConfig } = require('./config/cors.config');
 const { cacheManager } = require('./helpers/redisClient');

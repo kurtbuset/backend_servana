@@ -46,8 +46,7 @@ async function getClientInfo(clientId) {
         prof_id,
         profile:prof_id (
           prof_firstname,
-          prof_lastname,
-          prof_image
+          prof_lastname
         )
       `)
       .eq('client_id', clientId)

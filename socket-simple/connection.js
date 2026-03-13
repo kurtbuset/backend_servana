@@ -20,8 +20,6 @@ function handleConnection(socket, io) {
     connectedAt: socket.authenticatedAt
   };
   
-  console.log('🔌 Connection details:', connectionInfo);
-  
   // Set up disconnect handler
   setupDisconnectHandler(socket);
   
