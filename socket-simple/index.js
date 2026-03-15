@@ -33,12 +33,63 @@ const SocketManager = require("./manager");
 function initializeSocket(server, allowedOrigins) {
   const io = new Server(server, {
     cors: {
-      origin: allowedOrigins || [
-        "http://localhost:3000",
-        "http://localhost:8081",
-      ],
+      origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, React Native)
+        if (!origin) {
+          console.log(
+            "✅ Socket.IO: Allowing connection with no origin (mobile app)",
+          );
+          return callback(null, true);
+        }
+
+        console.log(`🔍 Socket.IO: Checking origin: ${origin}`);
+
+        // Allow if origin is in allowed list
+        if (allowedOrigins && allowedOrigins.includes(origin)) {
+          console.log(`✅ Socket.IO: Origin ${origin} is in allowed list`);
+          return callback(null, true);
+        }
+
+        // Allow any origin starting with http://192.168 (common home networks)
+        if (origin.startsWith("http://192.168")) {
+          console.log(`✅ Socket.IO: Allowing 192.168.x.x network: ${origin}`);
+          return callback(null, true);
+        }
+
+        // Allow any origin starting with http://10. (Android emulator, corporate networks)
+        if (origin.startsWith("http://10.")) {
+          console.log(`✅ Socket.IO: Allowing 10.x.x.x network: ${origin}`);
+          return callback(null, true);
+        }
+
+        // Allow any origin starting with http://172. (Docker networks)
+        if (origin.startsWith("http://172.")) {
+          console.log(`✅ Socket.IO: Allowing 172.x.x.x network: ${origin}`);
+          return callback(null, true);
+        }
+
+        // In development, allow all origins
+        if (
+          process.env.NODE_ENV === "development" ||
+          process.env.NODE_ENV !== "production"
+        ) {
+          console.log(
+            `✅ Socket.IO: Allowing origin in development mode: ${origin}`,
+          );
+          return callback(null, true);
+        }
+
+        console.error(`❌ Socket.IO: Origin ${origin} not allowed by CORS`);
+        return callback(new Error("Not allowed by CORS"));
+      },
       credentials: true,
+      methods: ["GET", "POST"],
     },
+    // Allow all transports for mobile compatibility
+    transports: ["websocket", "polling"],
+    // Increase ping timeout for mobile networks
+    pingTimeout: 60000,
+    pingInterval: 25000,
   });
 
   // Use simplified auth middleware
@@ -190,8 +241,6 @@ function initializeSocket(server, allowedOrigins) {
           sender_id: socket.user.userId,
         };
 
-        console.log("formattedMessage: ", formattedMessage);
-
         // Broadcast to all users in the chat room
         io.to(`chat_${chat_group_id}`).emit("receiveMessage", formattedMessage);
 
@@ -204,10 +253,6 @@ function initializeSocket(server, allowedOrigins) {
 
         // Handle customer list update (moves client to top of agent's list)
         await handleCustomerListUpdate(io, message, socket.user.userType);
-
-        console.log(
-          `📤 Message sent in chat ${chat_group_id} by ${socket.user.userType} ${socket.user.userId}`,
-        );
       } catch (error) {
         console.error("❌ Error sending message:", error);
         socket.emit("messageError", { message: "Failed to send message" });
@@ -288,7 +333,7 @@ function initializeSocket(server, allowedOrigins) {
           chatGroupId,
           userId: socket.user.userId,
           userType: socket.user.userType,
-        }); 
+        });
       }
     });
 

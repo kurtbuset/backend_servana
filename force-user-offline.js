@@ -17,7 +17,7 @@ async function forceUserOffline(userId) {
       .update({ last_seen: lastSeen })
       .eq('sys_user_id', userId)
       .select();
-    
+      
     if (error) {
       console.error('❌ Error updating user:', error);
       return;

@@ -11,21 +11,24 @@ class QueueController {
     router.use(getCurrentUser);
 
     // Get unassigned chat groups (queue) - requires message viewing permission
-    router.get("/chatgroups", 
+    router.get(
+      "/chatgroups",
       checkPermission(PERMISSIONS.VIEW_MESSAGE),
-      (req, res) => this.getChatGroups(req, res)
+      (req, res) => this.getChatGroups(req, res),
     );
 
     // Accept a chat from the queue - requires message viewing permission
-    router.post("/:chatGroupId/accept", 
+    router.post(
+      "/:chatGroupId/accept",
       checkPermission(PERMISSIONS.VIEW_MESSAGE),
-      (req, res) => this.acceptChat(req, res)
+      (req, res) => this.acceptChat(req, res),
     );
 
     // Get chat messages and assign to user - requires message viewing permission
-    router.get("/:clientId", 
+    router.get(
+      "/:clientId",
       checkPermission(PERMISSIONS.VIEW_MESSAGE),
-      (req, res) => this.getChatMessages(req, res)
+      (req, res) => this.getChatMessages(req, res),
     );
 
     return router;
@@ -97,7 +100,10 @@ class QueueController {
       // Sort by latest message time (newest first) and remove the sorting field
       const sortedFormatted = formatted
         .filter(Boolean)
-        .sort((a, b) => new Date(b.latestMessageTime) - new Date(a.latestMessageTime))
+        .sort(
+          (a, b) =>
+            new Date(b.latestMessageTime) - new Date(a.latestMessageTime),
+        )
         .map(({ latestMessageTime, ...rest }) => rest);
 
       res.json(sortedFormatted);
@@ -121,15 +127,43 @@ class QueueController {
 
       const chatGroup = await queueService.acceptChat(chatGroupId, userId);
 
-      // Emit socket notification for accepted chat
-      const io = req.app.get('io');
-      if (io && io.socketConfig) {
-        const notifier = io.socketConfig.getChatGroupNotifier();
-        if (notifier) {
-          // Get chat group details for notification
-          const chatGroupDetails = await queueService.getChatGroupDetails(chatGroupId);
-          
-          if (chatGroupDetails) {
+      // Emit socket notifications
+      const io = req.app.get("io");
+      if (io) {
+        // Get department ID to broadcast to the right room
+        const chatGroupDetails = await queueService.getChatGroupDetails(
+          chatGroupId,
+        );
+
+        if (chatGroupDetails && chatGroupDetails.dept_id) {
+          // 1. Send new_assignment to the agent who accepted (so it appears in their list as active)
+          const {
+            handleChatAssignment,
+          } = require("../socket-simple/customer-list");
+          await handleChatAssignment(io, chatGroupId, userId);
+
+          // 2. Emit remove_chat_group to all OTHER agents in the department
+          io.to(`department_${chatGroupDetails.dept_id}`).emit(
+            "customerListUpdate",
+            {
+              type: "remove_chat_group",
+              data: {
+                chat_group_id: chatGroupId,
+                accepted_by: userId,
+                department_id: chatGroupDetails.dept_id,
+              },
+            },
+          );
+
+          console.log(
+            `📡 Emitted new_assignment to agent ${userId} and remove_chat_group to department ${chatGroupDetails.dept_id}`,
+          );
+        }
+
+        // Legacy notification system (if exists)
+        if (io.socketConfig) {
+          const notifier = io.socketConfig.getChatGroupNotifier();
+          if (notifier && chatGroupDetails) {
             await notifier.notifyChatAccepted(chatGroupDetails, userId);
           }
         }
@@ -141,16 +175,16 @@ class QueueController {
         data: {
           chat_group_id: chatGroup.chat_group_id,
           sys_user_id: chatGroup.sys_user_id,
-          status: chatGroup.status
-        }
+          status: chatGroup.status,
+        },
       });
     } catch (err) {
       console.error("❌ Error accepting chat:", err);
-      
+
       if (err.message === "Chat group not found or already assigned") {
         return res.status(404).json({ error: err.message });
       }
-      
+
       res.status(500).json({ error: "Failed to accept chat" });
     }
   }
@@ -195,13 +229,19 @@ class QueueController {
         //   const existingLink = await queueService.checkUserChatGroupLink(userId, chat_group_id);
 
         //   if (existingLink) {
-            groupIdsToFetch.push(chat_group_id);
-          // }
+        groupIdsToFetch.push(chat_group_id);
+        // }
         // }
       }
 
       // Fetch chats
-      const messages = await queueService.getChatMessages(clientId, groupIdsToFetch, before, limit, userId);
+      const messages = await queueService.getChatMessages(
+        clientId,
+        groupIdsToFetch,
+        before,
+        limit,
+        userId,
+      );
 
       res.json({ messages });
     } catch (err) {

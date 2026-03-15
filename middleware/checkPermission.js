@@ -11,10 +11,12 @@ const checkPermission = (permission) => {
   try {
     PermissionValidator.validate(permission);
   } catch (error) {
-    console.error(`❌ Invalid permission in checkPermission middleware: ${error.message}`);
+    console.error(
+      `❌ Invalid permission in checkPermission middleware: ${error.message}`,
+    );
     const suggestions = PermissionValidator.getSuggestions(permission);
     if (suggestions.length > 0) {
-      console.error(`💡 Did you mean: ${suggestions.join(', ')}?`);
+      console.error(`💡 Did you mean: ${suggestions.join(", ")}?`);
     }
     throw error; // Fail fast during development
   }
@@ -26,18 +28,21 @@ const checkPermission = (permission) => {
       }
 
       const hasPermission = await profileService.checkUserPermission(
-        req.userId, 
-        permission
+        req.userId,
+        permission,
       );
 
       if (!hasPermission) {
-        return res.status(403).json({ 
-          error: `Access denied. Required permission: ${permission}` 
+        return res.status(403).json({
+          error: `Access denied. Required permission: ${permission}`,
         });
       }
       next();
     } catch (error) {
-      console.error(`❌ Permission check failed for ${permission}:`, error.message);
+      console.error(
+        `❌ Permission check failed for ${permission}:`,
+        error.message,
+      );
       res.status(500).json({ error: "Permission check failed" });
     }
   };
@@ -53,7 +58,9 @@ const checkAnyPermission = (permissions) => {
   try {
     PermissionValidator.validateMany(permissions);
   } catch (error) {
-    console.error(`❌ Invalid permissions in checkAnyPermission middleware: ${error.message}`);
+    console.error(
+      `❌ Invalid permissions in checkAnyPermission middleware: ${error.message}`,
+    );
     throw error; // Fail fast during development
   }
 
@@ -66,17 +73,19 @@ const checkAnyPermission = (permissions) => {
       // Check if user has any of the required permissions
       for (const permission of permissions) {
         const hasPermission = await profileService.checkUserPermission(
-          req.userId, 
-          permission
+          req.userId,
+          permission,
         );
-        
+
         if (hasPermission) {
           return next(); // User has at least one required permission
         }
       }
 
-      return res.status(403).json({ 
-        error: `Access denied. Required permissions: ${permissions.join(' OR ')}` 
+      return res.status(403).json({
+        error: `Access denied. Required permissions: ${permissions.join(
+          " OR ",
+        )}`,
       });
     } catch (error) {
       console.error(`❌ Permission check failed:`, error.message);
@@ -87,5 +96,5 @@ const checkAnyPermission = (permissions) => {
 
 module.exports = {
   checkPermission,
-  checkAnyPermission
+  checkAnyPermission,
 };

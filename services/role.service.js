@@ -63,7 +63,8 @@ class RoleService {
   async getAllRoles() {
     const { data, error } = await supabase
       .from("role")
-      .select(`
+      .select(
+        `
         role_id,
         role_name,
         role_is_active,
@@ -71,7 +72,8 @@ class RoleService {
         privilege:priv_id (
           ${Object.values(permissionMap).join(", ")}
         )
-      `)
+      `,
+      )
       .order("role_id", { ascending: true });
 
     if (error) throw error;
@@ -84,7 +86,7 @@ class RoleService {
       permissions: Object.entries(role.privilege || {})
         .filter(([, value]) => value === true)
         .map(([key]) =>
-          Object.keys(permissionMap).find((k) => permissionMap[k] === key)
+          Object.keys(permissionMap).find((k) => permissionMap[k] === key),
         )
         .filter(Boolean),
     }));
@@ -182,14 +184,16 @@ class RoleService {
       // First, get the role's default permissions
       const { data: roleData, error: roleError } = await supabase
         .from("role")
-        .select(`
+        .select(
+          `
           role_id,
           role_name,
           priv_id,
           privilege:priv_id (
             priv_can_view_message
           )
-        `)
+        `,
+        )
         .eq("role_id", roleId)
         .single();
 
@@ -201,7 +205,8 @@ class RoleService {
       // Get all users with this role, including their profile information
       const { data: users, error } = await supabase
         .from("sys_user")
-        .select(`
+        .select(
+          `
           sys_user_id,
           sys_user_email,
           sys_user_is_active,
@@ -211,7 +216,8 @@ class RoleService {
             prof_firstname,
             prof_lastname
           )
-        `)
+        `,
+        )
         .eq("role_id", roleId)
         .order("sys_user_email", { ascending: true });
 
@@ -221,7 +227,7 @@ class RoleService {
       }
 
       // Get profile images for all users
-      const profIds = users.filter(u => u.prof_id).map(u => u.prof_id);
+      const profIds = users.filter((u) => u.prof_id).map((u) => u.prof_id);
       let imageMap = {};
 
       if (profIds.length > 0) {
@@ -243,7 +249,8 @@ class RoleService {
       }
 
       // Get the role's default chat permission
-      const roleCanViewChats = roleData?.privilege?.priv_can_view_message || false;
+      const roleCanViewChats =
+        roleData?.privilege?.priv_can_view_message || false;
 
       // Format the response with profile information and images
       const formattedMembers = (users || []).map((user) => ({
@@ -252,13 +259,18 @@ class RoleService {
         sys_user_is_active: user.sys_user_is_active,
         priv_can_view_message: roleCanViewChats, // Inherited from role
         sys_user_created_at: user.sys_user_created_at,
-        profile: user.profile ? {
-          prof_firstname: user.profile.prof_firstname,
-          prof_lastname: user.profile.prof_lastname,
-          full_name: `${user.profile.prof_firstname || ''} ${user.profile.prof_lastname || ''}`.trim(),
-          profile_image: user.prof_id ? imageMap[user.prof_id] || null : null
-        } : null
-      }));    
+        profile: user.profile
+          ? {
+              prof_firstname: user.profile.prof_firstname,
+              prof_lastname: user.profile.prof_lastname,
+              full_name: `${user.profile.prof_firstname || ""} ${user.profile
+                .prof_lastname || ""}`.trim(),
+              profile_image: user.prof_id
+                ? imageMap[user.prof_id] || null
+                : null,
+            }
+          : null,
+      }));
 
       return formattedMembers;
     } catch (error) {
@@ -295,7 +307,7 @@ class RoleService {
     try {
       // For demonstration purposes, we'll just log the change
       // In a real implementation, you would store this in the database
-      
+
       // Simulate a successful update
       return { success: true };
     } catch (error) {
