@@ -288,6 +288,7 @@ class ChatController {
     try {
       const { chatGroupId } = req.params;
       const { userId } = req;
+      const feedbackData = req.body || {};
 
       if (!chatGroupId) {
         return res.status(400).json({
@@ -295,7 +296,12 @@ class ChatController {
         });
       }
 
-      const resolvedChat = await chatService.resolveChatGroup(chatGroupId, userId);
+      // Convert duration from formatted string to seconds if provided
+      if (feedbackData.chatDuration) {
+        feedbackData.chatDurationSeconds = this.parseDurationToSeconds(feedbackData.chatDuration);
+      }
+
+      const resolvedChat = await chatService.resolveChatGroup(chatGroupId, userId, feedbackData);
 
       res.json({
         success: true,
@@ -303,13 +309,32 @@ class ChatController {
         data: {
           chat_group_id: resolvedChat.chat_group_id,
           status: resolvedChat.status,
-          resolved_at: resolvedChat.resolved_at
+          resolved_at: resolvedChat.resolved_at,
+          feedback: resolvedChat.feedback
         }
       });
     } catch (err) {
       console.error("❌ Error resolving chat:", err.message);
       res.status(500).json({ error: "Failed to resolve chat" });
     }
+  }
+
+  // Helper method to parse duration string to seconds
+  parseDurationToSeconds(durationStr) {
+    if (!durationStr || typeof durationStr !== 'string') return null;
+    
+    let totalSeconds = 0;
+    
+    // Parse formats like "1h 30m", "45m 20s", "30s"
+    const hourMatch = durationStr.match(/(\d+)h/);
+    const minuteMatch = durationStr.match(/(\d+)m/);
+    const secondMatch = durationStr.match(/(\d+)s/);
+    
+    if (hourMatch) totalSeconds += parseInt(hourMatch[1]) * 3600;
+    if (minuteMatch) totalSeconds += parseInt(minuteMatch[1]) * 60;
+    if (secondMatch) totalSeconds += parseInt(secondMatch[1]);
+    
+    return totalSeconds > 0 ? totalSeconds : null;
   }
 
   /**

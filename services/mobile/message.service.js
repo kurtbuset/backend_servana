@@ -60,18 +60,21 @@ class MobileMessageService {
 
   /**
    * Get latest chat group for client
+   * Only returns ACTIVE chat groups (not resolved ones)
+   * This ensures clients always start fresh chats after resolution
    */
   async getLatestChatGroup(clientId) {
     const { data: group, error } = await supabase
       .from("chat_group")
-      .select("chat_group_id")
+      .select("chat_group_id, status")
       .eq("client_id", clientId)
+      .neq("status", "resolved") // Exclude resolved chats
       .order("chat_group_id", { ascending: false })
       .limit(1)
       .single();
 
     if (error || !group) {
-      throw new Error("Could not retrieve chat group");
+      throw new Error("Could not retrieve active chat group");
     }
 
     return group;
@@ -123,6 +126,125 @@ class MobileMessageService {
         agent_id: null,
         department
       };
+    }
+  }
+
+  /**
+   * End/resolve a chat group (mobile client initiated)
+   */
+  async endChatGroup(chatGroupId, clientId, feedbackData = {}) {
+    try {
+      // First verify the chat group belongs to this client
+      const { data: chatGroup, error: verifyError } = await supabase
+        .from("chat_group")
+        .select("chat_group_id, client_id, status")
+        .eq("chat_group_id", chatGroupId)
+        .eq("client_id", clientId)
+        .single();
+
+      if (verifyError || !chatGroup) {
+        throw new Error("Chat group not found or access denied");
+      }
+
+      if (chatGroup.status === "resolved") {
+        throw new Error("Chat group is already resolved");
+      }
+
+      // Update chat group status to resolved
+      const { data: updatedGroup, error: updateError } = await supabase
+        .from("chat_group")
+        .update({
+          status: "resolved",
+          resolved_at: new Date().toISOString()
+        })
+        .eq("chat_group_id", chatGroupId)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
+
+      // Store feedback if provided
+      let feedbackRecord = null;
+      if (feedbackData.rating || feedbackData.feedback) {
+        const { data: feedback, error: feedbackError } = await supabase
+          .from("chat_feedback")
+          .insert({
+            chat_group_id: chatGroupId,
+            client_id: clientId,
+            rating: feedbackData.rating || null,
+            feedback_text: feedbackData.feedback || null,
+            chat_duration_seconds: feedbackData.chatDurationSeconds || null,
+            message_count: feedbackData.messageCount || null
+          })
+          .select()
+          .single();
+
+        if (feedbackError) {
+          console.warn('⚠️ Failed to save feedback:', feedbackError.message);
+        } else {
+          feedbackRecord = feedback;
+          
+          // Update chat group with feedback reference
+          await supabase
+            .from("chat_group")
+            .update({ feedback_id: feedback.feedback_id })
+            .eq("chat_group_id", chatGroupId);
+        }
+      }
+
+      return {
+        chat_group_id: updatedGroup.chat_group_id,
+        status: updatedGroup.status,
+        resolved_at: updatedGroup.resolved_at,
+        feedback: feedbackRecord
+      };
+    } catch (error) {
+      console.error('❌ Error ending chat group:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get resolved chat history for client
+   */
+  async getResolvedChats(clientId) {
+    try {
+      const { data: resolvedChats, error } = await supabase
+        .from("chat_group")
+        .select(`
+          chat_group_id,
+          resolved_at,
+          created_at,
+          department:department(dept_name),
+          chat_feedback:feedback_id(
+            rating,
+            feedback_text,
+            chat_duration_seconds,
+            message_count
+          )
+        `)
+        .eq("client_id", clientId)
+        .eq("status", "resolved")
+        .order("resolved_at", { ascending: false });
+
+      if (error) throw error;
+
+      // Format the response
+      const formattedChats = resolvedChats.map(chat => ({
+        chat_group_id: chat.chat_group_id,
+        department: chat.department?.dept_name || 'Unknown Department',
+        resolved_at: chat.resolved_at,
+        created_at: chat.created_at,
+        rating: chat.chat_feedback?.rating || null,
+        feedback: chat.chat_feedback?.feedback_text || null,
+        duration_seconds: chat.chat_feedback?.chat_duration_seconds || null,
+        message_count: chat.chat_feedback?.message_count || 0,
+      }));
+
+      return formattedChats;
+    } catch (error) {
+      console.error('❌ Error fetching resolved chats:', error.message);
+      throw error;
     }
   }
 }
