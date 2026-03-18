@@ -216,26 +216,48 @@ class ChatService {
   /**
    * Get chat messages with pagination and sender information - Optimized with caching
    */
-  async getChatMessages(clientId, before = null, limit = 10, currentUserId = null) {
+  async getChatMessages(messageId, before = null, limit = 10, currentUserId = null) {
     try {
-      const groups = await this.getChatGroupsByClient(clientId);
+      // messageId can be either a chat_group_id or client_id
+      // First try to use it as chat_group_id, if that fails, treat as client_id
       
-      if (groups.length === 0) {
-        throw new Error("Chat group not found");
-      }
+      let chatGroupId = null;
+      
+      // Check if messageId is a chat_group_id
+      const { data: directChatGroup, error: directError } = await supabase
+        .from("chat_group")
+        .select("chat_group_id, client_id, status")
+        .eq("chat_group_id", messageId)
+        .single();
+      
+      if (!directError && directChatGroup) {
+        // messageId is a chat_group_id - use it directly
+        chatGroupId = directChatGroup.chat_group_id;
+        console.log(`✅ Using specific chat group ID: ${chatGroupId}`);
+      } else {
+        // messageId is a client_id - find the most recent active chat group
+        const { data: activeGroup, error: groupError } = await supabase
+          .from("chat_group")
+          .select("chat_group_id, sys_user_id, status, dept_id")
+          .eq("client_id", messageId)
+          .eq("status", "active") // Only active chats (not resolved)
+          .order("chat_group_id", { ascending: false }) // Get most recent
+          .limit(1)
+          .single();
 
-      const groupIds = groups.map((g) => g.chat_group_id);
+        if (groupError || !activeGroup) {
+          console.log(`❌ No active chat group found for client ${messageId}`);
+          return [];
+        }
+
+        chatGroupId = activeGroup.chat_group_id;
+        console.log(`✅ Using client's most recent active chat group: ${chatGroupId}`);
+      }
       
       // Try to get recent messages from cache first
       let cachedMessages = [];
       if (!before && limit <= 50) {
-        // Only use cache for recent messages (no pagination)
-        // OPTIMIZED: Batch cache retrieval using Promise.all instead of sequential loop
-        const cachePromises = groupIds.map(groupId => cacheService.getChatMessages(groupId));
-        const cachedMessageArrays = await Promise.all(cachePromises);
-        
-        // Flatten all cached messages
-        cachedMessages = cachedMessageArrays.flat();
+        cachedMessages = await cacheService.getChatMessages(chatGroupId);
         
         if (cachedMessages.length > 0) {
           // Sort and limit cached messages
@@ -289,10 +311,7 @@ class ChatService {
             )
           )
         `)
-        .or([
-          `client_id.eq.${clientId}`,
-          `chat_group_id.in.(${groupIds.join(",")})`,
-        ].join(","))
+        .eq("chat_group_id", chatGroupId) // Only messages from this specific chat group
         .order("chat_created_at", { ascending: false })
         .limit(parseInt(limit, 10));
 
@@ -303,14 +322,8 @@ class ChatService {
       const { data: rows, error: chatErr } = await query;
       if (chatErr) throw chatErr;
 
-      // Deduplicate messages and process in single pass
-      const seen = new Set();
+      // Process messages
       const messages = (rows || [])
-        .filter((r) => {
-          if (seen.has(r.chat_id)) return false;
-          seen.add(r.chat_id);
-          return true;
-        })
         .map((msg) => ({
           ...msg,
           sender_type: this.determineSenderType(msg, currentUserId),
@@ -321,20 +334,7 @@ class ChatService {
 
       // Cache recent messages if this was a fresh fetch
       if (!before && messages.length > 0) {
-        // OPTIMIZED: Batch cache storage using Promise.all instead of sequential loop
-        const cachePromises = groupIds.map(groupId => {
-          const groupMessages = messages.filter(m => m.chat_group_id === groupId);
-          if (groupMessages.length > 0) {
-            return cacheService.cacheChatMessages(groupId, groupMessages);
-          }
-          return Promise.resolve(); // Return resolved promise for groups with no messages
-        }).filter(promise => promise !== Promise.resolve()); // Remove empty promises
-
-        // Execute all cache operations in parallel
-        if (cachePromises.length > 0) {
-          await Promise.all(cachePromises);
-          // console.log(`✅ Cached messages for ${cachePromises.length} chat groups in parallel`);
-        }
+        await cacheService.cacheChatMessages(chatGroupId, messages);
       }
 
       return messages;
@@ -515,22 +515,53 @@ class ChatService {
   /**
    * Resolve chat group (mark as resolved)
    */
-  async resolveChatGroup(chatGroupId, userId) {
+  async resolveChatGroup(chatGroupId, userId, feedbackData = {}) {
     try {
-      const { data, error } = await supabase
+      // Start a transaction to handle both chat resolution and feedback
+      const { data: chatGroup, error: chatError } = await supabase
         .from("chat_group")
         .update({
-          status: "resolved"
+          status: "resolved",
+          resolved_at: new Date().toISOString()
         })
         .eq("chat_group_id", chatGroupId)
         .eq("sys_user_id", userId) // Ensure only the assigned user can resolve
         .select()
         .single();
 
-      if (error) throw error;
+      if (chatError) throw chatError;
       
-      if (!data) {
+      if (!chatGroup) {
         throw new Error("Chat group not found or you don't have permission to resolve it");
+      }
+
+      // If feedback data is provided, store it
+      let feedbackRecord = null;
+      if (feedbackData.rating || feedbackData.feedback) {
+        const { data: feedback, error: feedbackError } = await supabase
+          .from("chat_feedback")
+          .insert({
+            chat_group_id: chatGroupId,
+            client_id: chatGroup.client_id,
+            rating: feedbackData.rating || null,
+            feedback_text: feedbackData.feedback || null,
+            chat_duration_seconds: feedbackData.chatDurationSeconds || null,
+            message_count: feedbackData.messageCount || null
+          })
+          .select()
+          .single();
+
+        if (feedbackError) {
+          console.warn('⚠️ Failed to save feedback:', feedbackError.message);
+        } else {
+          feedbackRecord = feedback;
+          
+          // Update chat group with feedback reference
+          await supabase
+            .from("chat_group")
+            .update({ feedback_id: feedback.feedback_id })
+            .eq("chat_group_id", chatGroupId);
+        }
       }
 
       // Invalidate related caches
@@ -541,7 +572,10 @@ class ChatService {
       const userCacheKey = `user_chat_groups_${userId}`;
       await cacheService.cache.delete('CHAT_GROUP', userCacheKey);
 
-      return data;
+      return {
+        ...chatGroup,
+        feedback: feedbackRecord
+      };
     } catch (error) {
       console.error('❌ Error resolving chat group:', error.message);
       throw error;

@@ -21,6 +21,12 @@ class MobileMessageController {
     // Create a new chat group
     router.post("/group/create", (req, res) => this.createChatGroup(req, res));
 
+    // End/resolve a chat group (mobile client)
+    router.patch("/group/:id/end", (req, res) => this.endChatGroup(req, res));
+
+    // Get resolved chats for current client
+    router.get("/resolved", (req, res) => this.getResolvedChats(req, res));
+
     return router;
   }
   /**
@@ -108,6 +114,80 @@ class MobileMessageController {
       console.error("Error creating chat group:", err.message);
       res.status(500).json({ error: "Failed to create chat group" });
     }
+  }
+
+  /**
+   * End/resolve a chat group (mobile client)
+   */
+  async endChatGroup(req, res) {
+    try {
+      const { id: chatGroupId } = req.params;
+      const clientId = req.userId;
+      const feedbackData = req.body || {};
+
+      if (!chatGroupId) {
+        return res.status(400).json({ error: "Chat group ID is required" });
+      }
+
+      // Convert duration from formatted string to seconds if provided
+      if (feedbackData.chatDuration) {
+        feedbackData.chatDurationSeconds = this.parseDurationToSeconds(feedbackData.chatDuration);
+      }
+
+      const result = await mobileMessageService.endChatGroup(chatGroupId, clientId, feedbackData);
+
+      // Emit socket notification for chat end
+      const io = req.app.get('io');
+      if (io && io.socketConfig) {
+        const notifier = io.socketConfig.getChatGroupNotifier();
+        if (notifier) {
+          notifier.notifyChatGroupEnded(result, clientId);
+        }
+      }
+
+      res.json({
+        success: true,
+        message: "Chat ended successfully",
+        data: result
+      });
+    } catch (err) {
+      console.error("❌ Error ending chat group:", err.message);
+      res.status(500).json({ error: "Failed to end chat" });
+    }
+  }
+
+  /**
+   * Get resolved chats for current client
+   */
+  async getResolvedChats(req, res) {
+    try {
+      const clientId = req.userId;
+
+      const resolvedChats = await mobileMessageService.getResolvedChats(clientId);
+
+      res.json(resolvedChats);
+    } catch (err) {
+      console.error("❌ Error fetching resolved chats:", err.message);
+      res.status(500).json({ error: "Failed to fetch chat history" });
+    }
+  }
+
+  // Helper method to parse duration string to seconds
+  parseDurationToSeconds(durationStr) {
+    if (!durationStr || typeof durationStr !== 'string') return null;
+    
+    let totalSeconds = 0;
+    
+    // Parse formats like "1h 30m", "45m 20s", "30s"
+    const hourMatch = durationStr.match(/(\d+)h/);
+    const minuteMatch = durationStr.match(/(\d+)m/);
+    const secondMatch = durationStr.match(/(\d+)s/);
+    
+    if (hourMatch) totalSeconds += parseInt(hourMatch[1]) * 3600;
+    if (minuteMatch) totalSeconds += parseInt(minuteMatch[1]) * 60;
+    if (secondMatch) totalSeconds += parseInt(secondMatch[1]);
+    
+    return totalSeconds > 0 ? totalSeconds : null;
   }
 }
 
