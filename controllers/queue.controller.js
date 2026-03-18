@@ -154,10 +154,6 @@ class QueueController {
               },
             },
           );
-
-          console.log(
-            `📡 Emitted new_assignment to agent ${userId} and remove_chat_group to department ${chatGroupDetails.dept_id}`,
-          );
         }
 
         // Legacy notification system (if exists)

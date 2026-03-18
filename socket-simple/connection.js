@@ -7,7 +7,7 @@
  * Handle new socket connection
  */
 function handleConnection(socket, io) {
-  console.log(`✅ User ${socket.user.userId} (${socket.user.userType}) connected`);
+  // console.log(`✅ User ${socket.user.userId} (${socket.user.userType}) connected`);
   
   // Log connection details
   const connectionInfo = {
@@ -44,13 +44,24 @@ function setupDisconnectHandler(socket) {
       reason: reason
     };
     
-    console.log(`❌ User ${socket.user?.userId} (${socket.user?.userType}) disconnected: ${reason}`);
-    console.log('📊 Session info:', sessionInfo);
+    // console.log(`❌ User ${socket.user?.userId} (${socket.user?.userType}) disconnected: ${reason}`);
+    // console.log('📊 Session info:', sessionInfo);
     
     // Leave all rooms
     if (socket.currentChatGroup) {
-      socket.leave(`chat_${socket.currentChatGroup}`);
-      console.log(`👋 Left chat group ${socket.currentChatGroup}`);
+      const roomName = `chat_${socket.currentChatGroup}`;
+      const roomSize = socket.server.sockets.adapter.rooms.get(roomName)?.size || 0;
+      
+      socket.leave(roomName);
+      
+      // Log room leave on disconnect
+      console.log(`🚪 ${socket.user?.userType} ${socket.user?.userId} left room: ${roomName} on disconnect (${roomSize - 1} users remaining)`);
+      
+      // Log all rooms this socket was in
+      const userRooms = Array.from(socket.rooms).filter(room => room !== socket.id);
+      if (userRooms.length > 0) {
+        console.log(`📍 Socket ${socket.id} was in rooms: [${userRooms.join(', ')}] before disconnect`);
+      }
     }
     
     // Clean up socket data
@@ -103,7 +114,7 @@ function handleUserOffline(socket) {
 function trackActiveConnection(socket, io) {
   // Log current connection count
   const connectionCount = io.sockets.sockets.size;
-  console.log(`📈 Active connections: ${connectionCount}`);
+  // console.log(`📈 Active connections: ${connectionCount}`);
   
   // Optional: Store connection in database or cache for monitoring
   // This could be useful for analytics or admin dashboards
@@ -132,7 +143,7 @@ function setupGlobalErrorHandlers(io) {
   
   // Monitor connection attempts
   io.engine.on('initial_headers', (headers, request) => {
-    console.log('🔍 New connection attempt from:', request.socket.remoteAddress);
+    // console.log('🔍 New connection attempt from:', request.socket.remoteAddress);
   });
 }
 

@@ -1,7 +1,6 @@
 const express = require("express");
 const multer = require("multer");
 const profileService = require("../services/profile.service");
-const agentStatusService = require("../services/agentStatus.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
 const { checkPermission } = require("../middleware/checkPermission");
 const { PERMISSIONS } = require("../constants/permissions");
@@ -26,8 +25,8 @@ class ProfileController {
     // Get agent status
     router.get("/agent-status", (req, res) => this.getAgentStatus(req, res));
 
-    // Note: Agent status updates are now handled via Socket.IO events
-    // Use socket event 'updateAgentStatus' instead of REST API
+    // Update agent status
+    router.put("/agent-status", (req, res) => this.updateAgentStatus(req, res));
 
     return router;
   }
@@ -237,6 +236,48 @@ class ProfileController {
       }
       
       res.status(500).json({ error: "Server error fetching agent status" });
+    }
+  }
+
+  /**
+   * Update agent status
+   */
+  async updateAgentStatus(req, res) {
+    try {
+      const sysUserId = req.userId;
+      const { agent_status } = req.body;
+
+      if (!agent_status) {
+        return res.status(400).json({ error: "agent_status is required" });
+      }
+
+      // Update via service
+      await profileService.updateAgentStatus(sysUserId, agent_status);
+
+      // Broadcast via socket if available
+      const io = req.app.get('io');
+      if (io) {
+        const { broadcastStatusChangeToDepartments } = require("../socket-simple/agent-status");
+        await broadcastStatusChangeToDepartments(io, sysUserId, agent_status, "agent", new Date());
+        console.log(`📡 Broadcasted agent status change via REST API: ${agent_status}`);
+      }
+
+      res.json({ 
+        message: "Agent status updated successfully",
+        agent_status 
+      });
+    } catch (err) {
+      console.error("Error updating agent status:", err.message);
+      
+      if (err.message === "User not found") {
+        return res.status(404).json({ error: err.message });
+      }
+      
+      if (err.message.includes("Invalid agent status")) {
+        return res.status(400).json({ error: err.message });
+      }
+      
+      res.status(500).json({ error: "Server error updating agent status" });
     }
   }
 }

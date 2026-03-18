@@ -15,7 +15,7 @@ const {
   handleAgentHeartbeat,
   handleUpdateAgentStatus,
   handleGetAgentStatuses,
-  handleAgentDisconnect,
+  handleAgentExplicitOffline,
 } = require("./agent-status");
 const {
   joinDepartmentRooms,
@@ -37,34 +37,34 @@ function initializeSocket(server, allowedOrigins) {
         // Allow requests with no origin (mobile apps, React Native)
         if (!origin) {
           console.log(
-            "✅ Socket.IO: Allowing connection with no origin (mobile app)",
+            // "✅ Socket.IO: Allowing connection with no origin (mobile app)",
           );
           return callback(null, true);
         }
 
-        console.log(`🔍 Socket.IO: Checking origin: ${origin}`);
+        // console.log(`🔍 Socket.IO: Checking origin: ${origin}`);
 
         // Allow if origin is in allowed list
         if (allowedOrigins && allowedOrigins.includes(origin)) {
-          console.log(`✅ Socket.IO: Origin ${origin} is in allowed list`);
+          // console.log(`✅ Socket.IO: Origin ${origin} is in allowed list`);
           return callback(null, true);
         }
 
         // Allow any origin starting with http://192.168 (common home networks)
         if (origin.startsWith("http://192.168")) {
-          console.log(`✅ Socket.IO: Allowing 192.168.x.x network: ${origin}`);
+          // console.log(`✅ Socket.IO: Allowing 192.168.x.x network: ${origin}`);
           return callback(null, true);
         }
 
         // Allow any origin starting with http://10. (Android emulator, corporate networks)
         if (origin.startsWith("http://10.")) {
-          console.log(`✅ Socket.IO: Allowing 10.x.x.x network: ${origin}`);
+          // console.log(`✅ Socket.IO: Allowing 10.x.x.x network: ${origin}`);
           return callback(null, true);
         }
 
         // Allow any origin starting with http://172. (Docker networks)
         if (origin.startsWith("http://172.")) {
-          console.log(`✅ Socket.IO: Allowing 172.x.x.x network: ${origin}`);
+          // console.log(`✅ Socket.IO: Allowing 172.x.x.x network: ${origin}`);
           return callback(null, true);
         }
 
@@ -74,7 +74,7 @@ function initializeSocket(server, allowedOrigins) {
           process.env.NODE_ENV !== "production"
         ) {
           console.log(
-            `✅ Socket.IO: Allowing origin in development mode: ${origin}`,
+            // `✅ Socket.IO: Allowing origin in development mode: ${origin}`,
           );
           return callback(null, true);
         }
@@ -114,7 +114,6 @@ function initializeSocket(server, allowedOrigins) {
 
     // Join chat room
     socket.on("joinChatGroup", async ({ chatGroupId }) => {
-      console.log("chatGroupId: ", chatGroupId);
       try {
         if (!chatGroupId) {
           socket.emit("error", { message: "Chat group ID is required" });
@@ -135,11 +134,17 @@ function initializeSocket(server, allowedOrigins) {
           socket.currentChatGroup &&
           socket.currentChatGroup !== chatGroupId
         ) {
-          socket.leave(`chat_${socket.currentChatGroup}`);
+          const previousRoom = `chat_${socket.currentChatGroup}`;
+          socket.leave(previousRoom);
+          
+          // Log room leave
+          const previousRoomSize = io.sockets.adapter.rooms.get(previousRoom)?.size || 0;
+          console.log(`🚪 ${socket.user.userType} ${socket.user.userId} left room: ${previousRoom} (${previousRoomSize} users remaining)`);
+          
           handleUserLeft(
             io,
             socket,
-            `chat_${socket.currentChatGroup}`,
+            previousRoom,
             socket.user.userType,
             socket.user.userId,
             socket.currentChatGroup,
@@ -149,8 +154,26 @@ function initializeSocket(server, allowedOrigins) {
         socket.join(`chat_${chatGroupId}`);
         socket.currentChatGroup = chatGroupId;
 
-        // Notify room that user joined
-        handleUserJoined(
+        // Log room join with detailed info
+        // const roomName = `chat_${chatGroupId}`;
+        // const roomSize = io.sockets.adapter.rooms.get(roomName)?.size || 0;
+        // console.log(`🏠 ${socket.user.userType} ${socket.user.userId} joined room: ${roomName} (${roomSize} users total)`);
+        
+        // // Log all current rooms for this socket
+        // const userRooms = Array.from(socket.rooms).filter(room => room !== socket.id);
+        // console.log(`📍 Socket ${socket.id} is now in rooms: [${userRooms.join(', ')}]`);
+        
+        // // Log room members if room size is small (for debugging)
+        // if (roomSize <= 5) {
+        //   const roomSockets = io.sockets.adapter.rooms.get(roomName);
+        //   if (roomSockets) {
+        //     const memberIds = Array.from(roomSockets);
+        //     console.log(`👥 Room ${roomName} members: [${memberIds.join(', ')}]`);
+        //   }
+        // }
+
+        // Notify room that user joined and auto-mark messages as read
+        await handleUserJoined(
           io,
           socket,
           `chat_${chatGroupId}`,
@@ -159,54 +182,12 @@ function initializeSocket(server, allowedOrigins) {
           chatGroupId,
         );
 
-        console.log(
-          `📱 User ${socket.user.userId} joined chat group ${chatGroupId}`,
-        );
-
-        socket.emit("joinedRoom", {
-          chatGroupId,
-          roomInfo: roomAccess.roomInfo,
-        });
+        console.log(`📱 ${socket.user.userType} ${socket.user.userId} joining chat group ${chatGroupId}`);
       } catch (error) {
         console.error("❌ Error joining chat group:", error);
         socket.emit("error", {
           message: "Failed to join chat group: " + error.message,
         });
-      }
-    });
-
-    // Leave chat room
-    socket.on("leaveChatGroup", ({ chatGroupId }) => {
-      if (chatGroupId) {
-        socket.leave(`chat_${chatGroupId}`);
-        handleUserLeft(
-          io,
-          socket,
-          `chat_${chatGroupId}`,
-          socket.user.userType,
-          socket.user.userId,
-          chatGroupId,
-        );
-        console.log(
-          `👋 User ${socket.user.userId} left chat group ${chatGroupId}`,
-        );
-      }
-    });
-
-    // Leave previous room (explicit)
-    socket.on("leavePreviousRoom", () => {
-      console.log("leaving previous room");
-      if (socket.currentChatGroup) {
-        socket.leave(`chat_${socket.currentChatGroup}`);
-        handleUserLeft(
-          io,
-          socket,
-          `chat_${socket.currentChatGroup}`,
-          socket.user.userType,
-          socket.user.userId,
-          socket.currentChatGroup,
-        );
-        socket.currentChatGroup = null;
       }
     });
 
@@ -243,6 +224,65 @@ function initializeSocket(server, allowedOrigins) {
 
         // Broadcast to all users in the chat room
         io.to(`chat_${chat_group_id}`).emit("receiveMessage", formattedMessage);
+
+        // Auto-update message status based on recipient presence
+        const supabase = require("../helpers/supabaseClient");
+        const timestamp = new Date().toISOString();
+        
+        // Always mark as delivered immediately
+        await supabase
+          .from("chat") 
+          .update({ chat_delivered_at: timestamp })
+          .eq("chat_id", message.chat_id);
+
+        console.log(`📬 Message ${message.chat_id} auto-marked as delivered`);
+
+        // Check if recipient is currently in the chat room
+        const socketsInRoom = await io.in(`chat_${chat_group_id}`).fetchSockets();
+        const senderType = socket.user.userType;
+
+        let recipientIsActive = false;
+
+        console.log(`senderType: ${senderType}`)
+        
+        if (senderType === "agent") {
+          // Agent sent message - check if any client is in room
+          recipientIsActive = socketsInRoom.some(s => s.user.userType === "client");
+        } else if (senderType === "client") {
+          // Client sent message - check if any agent is in room
+          recipientIsActive = socketsInRoom.some(s => 
+            s.user.userType === "agent" || s.user.userType === "admin"
+          );
+        }
+
+        console.log('recipientIsActive: ', recipientIsActive)
+        if (recipientIsActive) {
+          // Recipient is active - also mark as read
+          await supabase
+            .from("chat")
+            .update({ chat_read_at: timestamp })
+            .eq("chat_id", message.chat_id);
+
+          console.log(`👁️ Message ${message.chat_id} auto-marked as read (recipient active)`);
+
+          // Broadcast read status
+          io.to(`chat_${chat_group_id}`).emit("messageStatusUpdate", {
+            chatId: message.chat_id,
+            status: "read",
+            timestamp,
+            updatedBy: "system",
+            updatedByType: "auto"
+          });
+        } else {
+          // Recipient not active - just broadcast delivered status
+          io.to(`chat_${chat_group_id}`).emit("messageStatusUpdate", {
+            chatId: message.chat_id,
+            status: "delivered",
+            timestamp,
+            updatedBy: "system",
+            updatedByType: "auto"
+          });
+        }
 
         // Send delivery confirmation
         socket.emit("messageDelivered", {
@@ -313,9 +353,6 @@ function initializeSocket(server, allowedOrigins) {
 
     // Typing indicators
     socket.on("typing", ({ chatGroupId, userName }) => {
-      console.log(
-        `👤 ${userName || socket.user.userType} typing in ${chatGroupId}`,
-      );
       if (chatGroupId) {
         socket.to(`chat_${chatGroupId}`).emit("typing", {
           chatGroupId,
@@ -327,7 +364,6 @@ function initializeSocket(server, allowedOrigins) {
     });
 
     socket.on("stopTyping", ({ chatGroupId }) => {
-      console.log(`👤 User stopped typing in ${chatGroupId}`);
       if (chatGroupId) {
         socket.to(`chat_${chatGroupId}`).emit("stopTyping", {
           chatGroupId,
@@ -355,7 +391,7 @@ function initializeSocket(server, allowedOrigins) {
     });
 
     socket.on("agentOffline", async () => {
-      await handleAgentDisconnect(socket, io);
+      await handleAgentExplicitOffline(socket, io);
     });
   });
 

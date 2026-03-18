@@ -416,7 +416,7 @@ class AgentAssignmentService {
         .order("created_at", { ascending: true }); // Oldest first
 
       if (queueError || !queuedChats || queuedChats.length === 0) {
-        console.log(`📭 No queued chats found for agent ${agentId}`);
+        // console.log(`📭 No queued chats found for agent ${agentId}`);
         return [];
       }
 

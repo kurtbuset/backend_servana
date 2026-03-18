@@ -187,19 +187,8 @@ async function authenticateMobileClient(socket) {
  */
 async function authenticateSocket(socket, next) {
   try {
-    console.log(`🔍 Socket ${socket.id} attempting authentication`);
-    console.log(`📋 Headers:`, {
-      authorization: socket.handshake.headers.authorization
-        ? "Present"
-        : "Missing",
-      cookie: socket.handshake.headers.cookie ? "Present" : "Missing",
-      origin: socket.handshake.headers.origin,
-      userAgent: socket.handshake.headers["user-agent"]?.substring(0, 50),
-    });
-    console.log(`📋 Auth data:`, socket.handshake.auth);
 
     const clientType = detectClientType(socket);
-    console.log(`📱 Detected client type: ${clientType}`);
 
     let user;
     if (clientType === "web") {
@@ -215,10 +204,6 @@ async function authenticateSocket(socket, next) {
     socket.clientType = clientType;
     socket.isAuthenticated = true;
     socket.authenticatedAt = new Date();
-
-    console.log(
-      `✅ ${clientType} user ${user.userId} (${user.userType}) authenticated`,
-    );
 
     next();
   } catch (error) {

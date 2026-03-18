@@ -43,8 +43,17 @@ async function handleAgentOnline(socket, io) {
       return;
     }
 
-    // Use existing status from database, default to not_accepting_chats if null
-    const agentStatus = userData?.agent_status || "not_accepting_chats";
+    // Use existing status from database, but handle offline status intelligently
+    // If status is offline (from previous disconnect), default to not_accepting_chats
+    // This prevents agents from automatically accepting chats after reconnection
+    let agentStatus = userData?.agent_status;
+    
+    if (!agentStatus || agentStatus === "offline") {
+      agentStatus = "not_accepting_chats";
+      console.log(`🔄 Agent ${userId} reconnected, defaulting to not_accepting_chats`);
+    } else {
+      console.log(`🔄 Agent ${userId} reconnected, restoring status: ${agentStatus}`);
+    }
 
     // Store agent status in memory
     agentStatuses.set(userId, {
@@ -55,10 +64,11 @@ async function handleAgentOnline(socket, io) {
       agentStatus,
     });
 
-    // Update only last_seen in database (preserve existing agent_status)
+    // Update database with corrected status and last_seen
     await supabase
       .from("sys_user")
       .update({
+        agent_status: agentStatus,
         last_seen: now.toISOString(),
       })
       .eq("sys_user_id", userId);
@@ -134,6 +144,7 @@ async function handleAgentHeartbeat(socket) {
 
 /**
  * Handle agent status update (accepting_chats, not_accepting_chats)
+ * socket first; then rest api
  */
 async function handleUpdateAgentStatus(socket, io, data) {
   try {
@@ -198,10 +209,6 @@ async function handleUpdateAgentStatus(socket, io, data) {
     }
 
     console.log(`✅ Agent ${userId} status updated to ${agentStatus}`);
-    socket.emit("agentStatusUpdateSuccess", {
-      agentStatus,
-      timestamp: now,
-    });
   } catch (error) {
     console.error("❌ Error updating agent status:", error);
     socket.emit("agentStatusError", { error: "Failed to update agent status" });
@@ -311,7 +318,25 @@ async function handleGetAgentStatuses(socket) {
 }
 
 /**
- * Handle agent disconnect - set to offline
+ * Handle explicit agent offline request (not just disconnect)
+ */
+async function handleAgentExplicitOffline(socket, io) {
+  try {
+    if (!socket.user) {
+      return;
+    }
+
+    const userId = socket.user.userId;
+
+    console.log(`😴 Agent ${userId} explicitly going offline`);
+    await setAgentOffline(userId, io);
+  } catch (error) {
+    console.error("❌ Error handling agent explicit offline:", error);
+  }
+}
+
+/**
+ * Handle agent disconnect - clean up memory only, preserve DB status
  */
 async function handleAgentDisconnect(socket, io) {
   try {
@@ -321,8 +346,14 @@ async function handleAgentDisconnect(socket, io) {
 
     const userId = socket.user.userId;
 
-    console.log(`👋 Agent ${userId} disconnected, setting to offline`);
-    await setAgentOffline(userId, io);
+    console.log(`👋 Agent ${userId} disconnected, cleaning up memory (preserving DB status)`);
+    
+    // Only clean up in-memory state, don't set offline in database
+    // This prevents page refresh from changing agent status
+    agentStatuses.delete(userId);
+    rateLimits.delete(userId);
+
+    console.log(`🧹 Cleaned up memory for agent ${userId}`);
   } catch (error) {
     console.error("❌ Error handling agent disconnect:", error);
   }
@@ -405,12 +436,6 @@ async function broadcastStatusChangeToDepartments(
     departmentIds.forEach((deptId) => {
       io.to(`department_${deptId}`).emit("agentStatusChanged", statusData);
     });
-
-    console.log(
-      `📡 Broadcasted agent status to ${
-        departmentIds.length
-      } department(s): ${departmentIds.join(", ")}`,
-    );
   } catch (error) {
     console.error("❌ Error broadcasting status change to departments:", error);
   }
@@ -430,13 +455,13 @@ async function assignQueuedChatsToNewAgent(agentId, io) {
     );
 
     if (assignedChats.length === 0) {
-      console.log(`📋 No queued chats to assign to agent ${agentId}`);
+      // console.log(`📋 No queued chats to assign to agent ${agentId}`);
       return;
     }
 
-    console.log(
-      `✅ Assigned ${assignedChats.length} queued chats to agent ${agentId}`,
-    );
+    // console.log(
+    //   `✅ Assigned ${assignedChats.length} queued chats to agent ${agentId}`,
+    // );
 
     // Notify the agent about each assigned chat
     for (const chat of assignedChats) {
@@ -463,6 +488,7 @@ async function assignQueuedChatsToNewAgent(agentId, io) {
 
 /**
  * Check for idle agents and set them offline
+ * This is the primary way agents are set to offline status in the database
  */
 async function checkIdleAgents(io) {
   const now = new Date();
@@ -518,6 +544,7 @@ module.exports = {
   handleUpdateAgentStatus,
   handleGetAgentStatuses,
   handleAgentDisconnect,
+  handleAgentExplicitOffline,
   setAgentOffline,
   checkIdleAgents,
   cleanupRateLimits,

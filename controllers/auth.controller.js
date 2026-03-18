@@ -1,6 +1,6 @@
 const express = require("express");
 const authService = require("../services/auth.service");
-const agentStatusService = require("../services/agentStatus.service");
+const profileService = require("../services/profile.service");
 const sessionService = require("../services/session.service");
 
 class AuthController {
@@ -87,8 +87,26 @@ class AuthController {
         });
       }
 
-      // Note: agent_status is now handled via Socket.IO events (agentOnline)
-      // The socket connection will automatically set the agent status
+      // Set agent status to accepting_chats for agents on login
+      if (sysUser.role_id) {
+        try {
+          // Get role to check if user is an agent
+          const { data: roleData, error: roleError } = await require("../helpers/supabaseClient")
+            .from("role")
+            .select("role_name")
+            .eq("role_id", sysUser.role_id)
+            .single();
+
+          if (!roleError && roleData && (roleData.role_name === "Agent" || roleData.role_name === "Admin")) {
+            // Set agent status to accepting_chats on login using existing service
+            await profileService.updateAgentStatus(sysUser.sys_user_id, "accepting_chats");
+            console.log(`✅ Set agent ${sysUser.sys_user_id} to accepting_chats on login`);
+          }
+        } catch (error) {
+          console.error('⚠️ Failed to set agent status on login:', error.message);
+          // Don't fail login if agent status update fails
+        }
+      }
 
       res.json({
         message: "Login successful",
@@ -268,8 +286,22 @@ class AuthController {
         }
       }
 
-      // Note: agent_status offline is now handled via Socket.IO events (agentOffline/disconnect)
-      // The socket disconnection will automatically set the agent status to offline
+      // Set agent offline on explicit logout (not handled by socket disconnect anymore)
+      if (userId) {
+        try {
+          const supabase = require("../helpers/supabaseClient");
+          await supabase
+            .from("sys_user")
+            .update({
+              agent_status: "offline",
+              last_seen: new Date().toISOString(),
+            })
+            .eq("sys_user_id", userId);
+          console.log(`😴 Set agent ${userId} offline on logout`);
+        } catch (error) {
+          console.error('⚠️ Failed to set agent offline on logout:', error.message);
+        }
+      }
 
       // Delete session if it exists
       if (cache && sessionId) {

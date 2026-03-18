@@ -32,7 +32,16 @@ class MobileMessageService {
   async getMessagesByGroupId(chatGroupId, before = null, limit = 10) {
     let query = supabase
       .from("chat")
-      .select("*")
+      .select(`
+        chat_id,
+        chat_body,
+        chat_created_at,
+        chat_delivered_at,
+        chat_read_at,
+        sys_user_id,
+        client_id,
+        chat_group_id
+      `)
       .eq("chat_group_id", chatGroupId)
       .order("chat_created_at", { ascending: false }) // Get newest first for pagination
       .limit(limit);

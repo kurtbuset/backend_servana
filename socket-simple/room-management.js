@@ -202,15 +202,156 @@ async function getRoomInfo(chatGroupId) {
 }
 
 /**
+ * Auto-mark messages as read when user joins room
+ * Phase 1: Latest message immediately for instant feedback
+ * Phase 2: Recent messages (24h) in background for proper read counts
+ */
+async function autoMarkMessagesAsRead(io, roomId, userType, userId, chatGroupId) {
+  try {
+    const timestamp = new Date().toISOString();
+    
+    // Phase 1: Mark latest message immediately for instant feedback
+    const latestMessageId = await markLatestMessageAsRead(chatGroupId, userType, timestamp);
+    
+    if (latestMessageId) {
+      // Emit immediate status update
+      io.to(roomId).emit('messageStatusUpdate', {
+        chatId: latestMessageId,
+        status: 'read',
+        timestamp,
+        updatedBy: 'system',
+        updatedByType: 'auto_join'
+      });
+
+      console.log(`👁️ Auto-marked latest message ${latestMessageId} as read when ${userType} ${userId} joined room ${chatGroupId}`);
+    }
+
+    // Phase 2: Mark recent messages in background after delay
+    setTimeout(async () => {
+      await markRecentMessagesAsRead(io, roomId, chatGroupId, userType, userId, latestMessageId);
+    }, 2000);
+
+  } catch (error) {
+    console.error('❌ Error in autoMarkMessagesAsRead:', error);
+  }
+}
+
+/**
+ * Mark the latest unread message as read immediately
+ */
+async function markLatestMessageAsRead(chatGroupId, userType, timestamp) {
+  try {
+    let query = supabase
+      .from('chat')
+      .select('chat_id, sys_user_id, client_id')
+      .eq('chat_group_id', chatGroupId)
+      .is('chat_read_at', null)
+      .not('chat_delivered_at', 'is', null)
+      .order('chat_created_at', { ascending: false })
+      .limit(1);
+
+    let latestMessageId = null;
+    
+    if (userType === 'client') {
+      const { data: messages, error } = await query.not('sys_user_id', 'is', null);
+      if (!error && messages && messages.length > 0) {
+        latestMessageId = messages[0].chat_id;
+      }
+    } else if (userType === 'agent' || userType === 'admin') {
+      const { data: messages, error } = await query.not('client_id', 'is', null);
+      if (!error && messages && messages.length > 0) {
+        latestMessageId = messages[0].chat_id;
+      }
+    }
+
+    // Update latest message
+    if (latestMessageId) {
+      await supabase
+        .from('chat')
+        .update({ chat_read_at: timestamp })
+        .eq('chat_id', latestMessageId);
+    }
+
+    return latestMessageId;
+  } catch (error) {
+    console.error('❌ Error marking latest message as read:', error);
+    return null;
+  }
+}
+
+/**
+ * Mark recent messages (last 24 hours) as read in background
+ */
+async function markRecentMessagesAsRead(io, roomId, chatGroupId, userType, userId, excludeMessageId) {
+  try {
+    const recentTimestamp = new Date(Date.now() - 24*60*60*1000).toISOString();
+    
+    let query = supabase
+      .from('chat')
+      .select('chat_id')
+      .eq('chat_group_id', chatGroupId)
+      .is('chat_read_at', null)
+      .not('chat_delivered_at', 'is', null)
+      .gte('chat_created_at', recentTimestamp)
+      .neq('chat_id', excludeMessageId || 0)
+      .limit(20);
+
+    let recentMessageIds = [];
+    
+    if (userType === 'client') {
+      const { data: messages, error } = await query.not('sys_user_id', 'is', null);
+      if (!error && messages && messages.length > 0) {
+        recentMessageIds = messages.map(m => m.chat_id);
+      }
+    } else if (userType === 'agent' || userType === 'admin') {
+      const { data: messages, error } = await query.not('client_id', 'is', null);
+      if (!error && messages && messages.length > 0) {
+        recentMessageIds = messages.map(m => m.chat_id);
+      }
+    }
+
+    // Batch update recent messages
+    if (recentMessageIds.length > 0) {
+      const batchTimestamp = new Date().toISOString();
+      
+      await supabase
+        .from('chat')
+        .update({ chat_read_at: batchTimestamp })
+        .in('chat_id', recentMessageIds);
+
+      // Emit status updates for recent messages
+      recentMessageIds.forEach(chatId => {
+        io.to(roomId).emit('messageStatusUpdate', {
+          chatId: chatId,
+          status: 'read',
+          timestamp: batchTimestamp,
+          updatedBy: 'system',
+          updatedByType: 'auto_join_batch'
+        });
+      });
+
+      console.log(`👁️ Background: Auto-marked ${recentMessageIds.length} recent messages as read for ${userType} ${userId} in room ${chatGroupId}`);
+    }
+  } catch (error) {
+    console.error('❌ Error in background message marking:', error);
+  }
+}
+
+/**
  * Handle user joining room with broadcasts
  */
-function handleUserJoined(io, socket, roomId, userType, userId, chatGroupId) {
+async function handleUserJoined(io, socket, roomId, userType, userId, chatGroupId) {
   // Broadcast to room that user joined
   socket.to(roomId).emit('userJoined', {
     userType,
     userId,
     chatGroupId,
     timestamp: new Date().toISOString()
+  });
+
+  // Auto-mark messages as read (non-blocking)
+  setImmediate(() => {
+    autoMarkMessagesAsRead(io, roomId, userType, userId, chatGroupId);
   });
 }
 

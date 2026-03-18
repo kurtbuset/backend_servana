@@ -262,6 +262,8 @@ class ChatService {
           chat_group_id,
           client_id,
           sys_user_id,
+          chat_delivered_at,
+          chat_read_at,
           sys_user:sys_user(
             sys_user_id,
             prof_id,

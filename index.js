@@ -84,7 +84,7 @@ async function startServer() {
     // Socket connection monitoring
     setInterval(() => {
       const socketCount = io.sockets.sockets.size;
-      console.log(`🔌 Active sockets: ${socketCount}`);
+      // console.log(`🔌 Active sockets: ${socketCount}`);
       
       if (socketCount > 1000) {
         console.warn('⚠️ High socket connection count:', socketCount);
