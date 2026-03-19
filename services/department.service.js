@@ -5,6 +5,7 @@ class DepartmentService {
   /**
    * Get all departments - Redis caching with 4-hour TTL and write-through strategy
    * Cache-first approach: if cache found, return cache data; if not, use business logic for data fetching
+   * Only returns active departments (dept_is_active = true)
    */
   async getAllDepartments() {
     try {
@@ -13,7 +14,8 @@ class DepartmentService {
       
       if (cachedDepartments && cachedDepartments.length >= 0) {
         console.log(`✅ Cache HIT: Retrieved ${cachedDepartments.length} departments from Redis cache`);
-        return cachedDepartments;
+        // Filter for active departments only
+        return cachedDepartments.filter(dept => dept.dept_is_active !== false);
       }
       
       // Cache miss - use business logic for data fetching
@@ -21,6 +23,7 @@ class DepartmentService {
       const { data, error } = await supabase
         .from("department")
         .select("*")
+        .eq("dept_is_active", true) // Only get active departments
         .order("dept_name", { ascending: true });
 
       if (error) throw error;
@@ -40,7 +43,8 @@ class DepartmentService {
         const staleCachedData = await cacheService.getDepartments();
         if (staleCachedData && staleCachedData.length >= 0) {
           console.log('⚠️ Returning stale cache data due to database error');
-          return staleCachedData;
+          // Filter for active departments only
+          return staleCachedData.filter(dept => dept.dept_is_active !== false);
         }
       } catch (cacheError) {
         console.error('❌ Cache fallback also failed:', cacheError.message);

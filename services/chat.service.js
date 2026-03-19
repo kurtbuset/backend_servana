@@ -1,6 +1,7 @@
 const supabase = require("../helpers/supabaseClient");
 const cacheService = require("./cache.service");
 const cookie = require("cookie");
+const agentAssignmentService = require("./agentAssignment.service");
 
 class ChatService {
   /**
@@ -322,15 +323,95 @@ class ChatService {
       const { data: rows, error: chatErr } = await query;
       if (chatErr) throw chatErr;
 
-      // Process messages
-      const messages = (rows || [])
-        .map((msg) => ({
+      // Fetch transfer logs for this chat group
+      const { data: transfers, error: transferErr } = await supabase
+        .from("chat_transfer_log")
+        .select(`
+          transfer_id,
+          transferred_at,
+          transfer_type,
+          from_dept:department!from_dept_id(dept_name),
+          to_dept:department!to_dept_id(dept_name),
+          to_agent:sys_user!to_agent_id(
+            sys_user_id,
+            profile:profile(prof_firstname, prof_lastname)
+          )
+        `)
+        .eq("chat_group_id", chatGroupId)
+        .order("transferred_at", { ascending: false });
+
+      if (transferErr) {
+        console.error("⚠️ Error fetching transfer logs:", transferErr);
+      }
+
+      // Convert transfers to message format
+      const transferMessages = (transfers || []).map(transfer => {
+        let transferText = '';
+        const toDept = transfer.to_dept?.dept_name || 'Unknown Department';
+        const toAgent = transfer.to_agent?.profile 
+          ? `${transfer.to_agent.profile.prof_firstname} ${transfer.to_agent.profile.prof_lastname}`.trim()
+          : null;
+
+        // Handle transfer_type (default to 'manual' if null for backward compatibility)
+        const transferType = transfer.transfer_type || 'manual';
+
+        if (transferType === 'manual') {
+          transferText = toAgent 
+            ? `Chat transferred to ${toDept} - Assigned to ${toAgent}`
+            : `Chat transferred to ${toDept}`;
+        } else if (transferType === 'auto_reassign') {
+          transferText = toAgent
+            ? `Chat automatically reassigned to ${toAgent}`
+            : 'Chat automatically reassigned';
+        } else if (transferType === 'agent_offline') {
+          transferText = 'Chat reassigned (previous agent went offline)';
+        } else {
+          transferText = 'Chat transferred';
+        }
+
+        return {
+          chat_id: `transfer_${transfer.transfer_id}`,
+          chat_body: transferText,
+          chat_created_at: transfer.transferred_at,
+          chat_group_id: chatGroupId,
+          sender_type: 'system',
+          message_type: 'transfer',
+          transfer_data: {
+            transfer_id: transfer.transfer_id,
+            transfer_type: transferType,
+            to_dept: toDept,
+            to_agent: toAgent
+          }
+        };
+      });
+
+      // Merge messages and transfers, then sort by timestamp
+      const allMessages = [...(rows || []), ...transferMessages];
+      allMessages.sort((a, b) => new Date(a.chat_created_at) - new Date(b.chat_created_at));
+
+      // Apply pagination filter if needed
+      let filteredMessages = allMessages;
+      if (before) {
+        filteredMessages = allMessages.filter(msg => 
+          new Date(msg.chat_created_at) < new Date(before)
+        );
+      }
+
+      // Limit results
+      filteredMessages = filteredMessages.slice(-parseInt(limit, 10));
+
+      // Process messages (skip transfer messages as they're already formatted)
+      const messages = filteredMessages.map((msg) => {
+        if (msg.message_type === 'transfer') {
+          return msg;
+        }
+        return {
           ...msg,
           sender_type: this.determineSenderType(msg, currentUserId),
           sender_name: this.getSenderName(msg),
           sender_image: this.getSenderImageOptimized(msg)
-        }))
-        .reverse();
+        };
+      });
 
       // Cache recent messages if this was a fresh fetch
       if (!before && messages.length > 0) {
@@ -479,33 +560,106 @@ class ChatService {
    */
   async transferChatGroup(chatGroupId, deptId, userId) {
     try {
-      const { data, error } = await supabase
+      // Verify the chat group exists and user has permission
+      const { data: chatGroup, error: fetchError } = await supabase
         .from("chat_group")
-        .update({
-          status: "transferred",
-          sys_user_id: null,
-          dept_id: deptId
-        })
+        .select("chat_group_id, dept_id, sys_user_id")
         .eq("chat_group_id", chatGroupId)
         .eq("sys_user_id", userId) // Ensure only the assigned user can transfer
+        .single();
+
+      if (fetchError || !chatGroup) {
+        throw new Error("Chat group not found or you don't have permission to transfer it");
+      }
+
+      const fromDeptId = chatGroup.dept_id;
+      const fromAgentId = chatGroup.sys_user_id;
+
+      // Log the transfer in chat_transfer_log FIRST (without to_agent_id)
+      const { data: transferLog, error: logError } = await supabase
+        .from("chat_transfer_log")
+        .insert({
+          chat_group_id: chatGroupId,
+          from_agent_id: fromAgentId,
+          to_agent_id: null, // Will be updated if agent is found
+          from_dept_id: fromDeptId,
+          to_dept_id: deptId,
+          transfer_type: "manual",
+          transferred_at: new Date().toISOString()
+        })
         .select()
         .single();
 
-      if (error) throw error;
-      
-      if (!data) {
-        throw new Error("Chat group not found or you don't have permission to transfer it");
+      if (logError) {
+        console.error("⚠️ Failed to log transfer:", logError.message);
+        // Don't throw - continue with transfer even if logging fails
       }
+
+      // Update department first (unassign from current agent)
+      const { error: updateError } = await supabase
+        .from("chat_group")
+        .update({
+          dept_id: deptId,
+          sys_user_id: null
+        })
+        .eq("chat_group_id", chatGroupId);
+
+      if (updateError) throw updateError;
+
+      // Use round-robin to auto-assign to an available agent in the new department
+      const assignmentResult = await agentAssignmentService.autoAssignChatGroup(
+        chatGroupId,
+        deptId
+      );
+
+      console.log(
+        `✅ Chat ${chatGroupId} transferred from dept ${fromDeptId} to ${deptId}:`,
+        assignmentResult.assigned ? `assigned to agent ${assignmentResult.agentId}` : "queued (no available agents)"
+      );
+
+      // If agent was found, UPDATE the transfer log with to_agent_id
+      if (assignmentResult.assigned && assignmentResult.agentId && transferLog) {
+        const { error: updateLogError } = await supabase
+          .from("chat_transfer_log")
+          .update({
+            to_agent_id: assignmentResult.agentId
+          })
+          .eq("transfer_id", transferLog.transfer_id);
+
+        if (updateLogError) {
+          console.error("⚠️ Failed to update transfer log with to_agent_id:", updateLogError.message);
+        } else {
+          console.log(`✅ Updated transfer log ${transferLog.transfer_id} with to_agent_id: ${assignmentResult.agentId}`);
+        }
+      }
+
+      // Fetch the updated chat group
+      const { data: updatedChat, error: finalError } = await supabase
+        .from("chat_group")
+        .select("chat_group_id, dept_id, sys_user_id, status")
+        .eq("chat_group_id", chatGroupId)
+        .single();
+
+      if (finalError) throw finalError;
 
       // Invalidate related caches
       await cacheService.invalidateChatGroup(chatGroupId);
       await cacheService.invalidateChatMessages(chatGroupId);
       
-      // Invalidate user's chat groups cache
-      const userCacheKey = `user_chat_groups_${userId}`;
-      await cacheService.cache.delete('CHAT_GROUP', userCacheKey);
+      // Invalidate both old and new agent's chat groups cache
+      const oldAgentCacheKey = `user_chat_groups_${userId}`;
+      await cacheService.cache.delete('CHAT_GROUP', oldAgentCacheKey);
+      
+      if (assignmentResult.assigned && assignmentResult.agentId) {
+        const newAgentCacheKey = `user_chat_groups_${assignmentResult.agentId}`;
+        await cacheService.cache.delete('CHAT_GROUP', newAgentCacheKey);
+      }
 
-      return data;
+      return {
+        ...updatedChat,
+        from_dept_id: fromDeptId,
+        assignmentResult
+      };
     } catch (error) {
       console.error('❌ Error transferring chat group:', error.message);
       throw error;

@@ -36,7 +36,7 @@ class QueueService {
             )
           )
         `)
-        .or(`and(status.eq.queued,sys_user_id.is.null),and(status.eq.transferred,sys_user_id.is.null)`)
+        .or(`status.eq.queued,and(status.eq.queued,sys_user_id.is.null)`)
         .in("dept_id", userDeptIds)
         .not("client_id", "is", null); // Only groups with clients
 
@@ -170,7 +170,7 @@ class QueueService {
           status: "active"
         })
         .eq("chat_group_id", chatGroupId)
-        .in("status", ["queued", "transferred"]) // Accept both queued and transferred chats
+        .eq("status", "queued") // Only queued chats
         .is("sys_user_id", null)
         .select()
         .single();
@@ -179,6 +179,25 @@ class QueueService {
       
       if (!data) {
         throw new Error("Chat group not found or already assigned");
+      }
+
+      // Update the most recent transfer log for this chat group with to_agent_id
+      // This handles cases where chat was transferred but no agent was available (queued)
+      const { error: updateLogError } = await supabase
+        .from("chat_transfer_log")
+        .update({
+          to_agent_id: userId
+        })
+        .eq("chat_group_id", chatGroupId)
+        .is("to_agent_id", null) // Only update if to_agent_id is still null
+        .order("transferred_at", { ascending: false })
+        .limit(1);
+
+      if (updateLogError) {
+        console.error("⚠️ Failed to update transfer log with to_agent_id:", updateLogError.message);
+        // Don't throw - chat acceptance succeeded, log update is secondary
+      } else {
+        console.log(`✅ Updated transfer log for chat ${chatGroupId} with to_agent_id: ${userId}`);
       }
 
       // Invalidate related caches

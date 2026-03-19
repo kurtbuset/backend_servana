@@ -258,16 +258,68 @@ class ChatController {
         });
       }
 
-      const transferredChat = await chatService.transferChatGroup(chatGroupId, deptId, userId);
+      const result = await chatService.transferChatGroup(chatGroupId, deptId, userId);
+
+      // Emit socket event for real-time updates
+      const io = req.app.get('io');
+      if (io) {
+        const { handleChatTransfer } = require('../socket-simple/customer-list');
+        await handleChatTransfer(io, chatGroupId, userId, deptId, result.assignmentResult);
+        
+        // Emit transfer status message to the chat room
+        const supabase = require('../helpers/supabaseClient');
+        
+        // Get department names
+        const { data: fromDept } = await supabase
+          .from('department')
+          .select('dept_name')
+          .eq('dept_id', result.from_dept_id || 0)
+          .single();
+          
+        const { data: toDept } = await supabase
+          .from('department')
+          .select('dept_name')
+          .eq('dept_id', deptId)
+          .single();
+        
+        // Get agent name if assigned
+        let toAgentName = null;
+        if (result.assignmentResult.assigned && result.assignmentResult.agentId) {
+          const { data: agentData } = await supabase
+            .from('sys_user')
+            .select('prof_id, profile:profile(prof_firstname, prof_lastname)')
+            .eq('sys_user_id', result.assignmentResult.agentId)
+            .single();
+          
+          if (agentData?.profile) {
+            toAgentName = `${agentData.profile.prof_firstname} ${agentData.profile.prof_lastname}`.trim();
+          }
+        }
+        
+        // Emit transfer message to chat room
+        io.to(`chat_${chatGroupId}`).emit('chatTransferred', {
+          chat_group_id: chatGroupId,
+          transfer_type: 'manual',
+          from_dept: fromDept?.dept_name || 'Unknown',
+          to_dept: toDept?.dept_name || 'Unknown',
+          to_agent: toAgentName,
+          assigned: result.assignmentResult.assigned,
+          timestamp: new Date().toISOString()
+        });
+      }
 
       res.json({
         success: true,
-        message: "Chat transferred successfully",
+        message: result.assignmentResult.assigned 
+          ? `Chat transferred and assigned to agent ${result.assignmentResult.agentId}`
+          : "Chat transferred and queued (no available agents)",
         data: {
-          chat_group_id: transferredChat.chat_group_id,
-          dept_id: transferredChat.dept_id,
-          status: transferredChat.status,
-          sys_user_id: transferredChat.sys_user_id
+          chat_group_id: result.chat_group_id,
+          dept_id: result.dept_id,
+          status: result.status,
+          sys_user_id: result.sys_user_id,
+          assigned: result.assignmentResult.assigned,
+          assigned_agent_id: result.assignmentResult.agentId || null
         }
       });
     } catch (err) {

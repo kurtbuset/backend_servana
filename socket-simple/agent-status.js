@@ -459,10 +459,6 @@ async function assignQueuedChatsToNewAgent(agentId, io) {
       return;
     }
 
-    // console.log(
-    //   `✅ Assigned ${assignedChats.length} queued chats to agent ${agentId}`,
-    // );
-
     // Notify the agent about each assigned chat
     for (const chat of assignedChats) {
       await handleChatAssignment(io, chat.chat_group_id, agentId);

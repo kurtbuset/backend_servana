@@ -171,20 +171,6 @@ function handleChatResolved(io, chatGroupId, departmentId) {
 }
 
 /**
- * Handle chat reactivation customer list update
- */
-function handleChatReactivated(io, chatGroupId, departmentId, agentId) {
-  broadcastCustomerListUpdate(io, departmentId, {
-    type: "chat_reactivated",
-    data: {
-      chat_group_id: chatGroupId,
-      department_id: departmentId,
-      agent_id: agentId,
-    },
-  });
-}
-
-/**
  * Handle new chat assignment
  */
 async function handleChatAssignment(io, chatGroupId, agentId) {
@@ -224,12 +210,69 @@ async function handleChatAssignment(io, chatGroupId, agentId) {
   }
 }
 
+/**
+ * Handle chat transfer between departments
+ */
+async function handleChatTransfer(io, chatGroupId, fromAgentId, toDeptId, assignmentResult) {
+  try {
+    const chatGroupInfo = await getChatGroupInfo(chatGroupId);
+    if (!chatGroupInfo) return;
+
+    const clientInfo = await getClientInfo(chatGroupInfo.client_id);
+    if (!clientInfo) return;
+
+    const customerUpdate = {
+      chat_group_id: chatGroupId,
+      client_id: chatGroupInfo.client_id,
+      department_id: toDeptId,
+      customer: {
+        id: clientInfo.client_id,
+        chat_group_id: chatGroupId,
+        name: clientInfo.name,
+        number: clientInfo.client_number,
+        profile: clientInfo.profile_image,
+        status: assignmentResult.assigned ? "active" : "queued",
+        department: chatGroupInfo.department?.dept_name || "Unknown",
+      },
+    };
+
+    // Remove from old agent's list
+    if (fromAgentId) {
+      io.to(`agent_${fromAgentId}`).emit("customerListUpdate", {
+        type: "chat_transferred_out",
+        data: {
+          chat_group_id: chatGroupId,
+        },
+      });
+      console.log(`📋 Removed chat ${chatGroupId} from agent ${fromAgentId}'s list`);
+    }
+
+    // If assigned to new agent, add to their list
+    if (assignmentResult.assigned && assignmentResult.agentId) {
+      io.to(`agent_${assignmentResult.agentId}`).emit("customerListUpdate", {
+        type: "new_assignment",
+        data: customerUpdate,
+      });
+      console.log(`📋 Added chat ${chatGroupId} to agent ${assignmentResult.agentId}'s list`);
+    } else {
+      // If queued, broadcast to all agents in the new department
+      broadcastCustomerListUpdate(io, toDeptId, {
+        type: "new_assignment",
+        data: customerUpdate,
+      });
+      console.log(`📋 Broadcast queued chat ${chatGroupId} to department ${toDeptId}`);
+    }
+  } catch (error) {
+    console.error("❌ Error handling chat transfer update:", error);
+  }
+}
+
 module.exports = {
   handleCustomerListUpdate,
   broadcastCustomerListUpdate,
   handleChatResolved,
-  handleChatReactivated,
   handleChatAssignment,
+  handleChatTransfer,
   getChatGroupInfo,
   getClientInfo,
 };
