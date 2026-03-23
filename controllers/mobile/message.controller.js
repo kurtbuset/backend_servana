@@ -129,20 +129,66 @@ class MobileMessageController {
         return res.status(400).json({ error: "Chat group ID is required" });
       }
 
+      // Validate rating if provided
+      if (feedbackData.rating !== undefined && feedbackData.rating !== null) {
+        const rating = parseInt(feedbackData.rating);
+        if (isNaN(rating) || rating < 0 || rating > 5) {
+          return res.status(400).json({ error: "Rating must be between 0 and 5" });
+        }
+        feedbackData.rating = rating;
+      }
+
       // Convert duration from formatted string to seconds if provided
       if (feedbackData.chatDuration) {
         feedbackData.chatDurationSeconds = this.parseDurationToSeconds(feedbackData.chatDuration);
+        console.log('⏱️ Duration conversion:', {
+          original: feedbackData.chatDuration,
+          seconds: feedbackData.chatDurationSeconds
+        });
       }
+
+      // Validate message count
+      if (feedbackData.messageCount !== undefined) {
+        feedbackData.messageCount = parseInt(feedbackData.messageCount) || 0;
+      }
+
+      console.log('📊 Processing feedback data:', {
+        chatGroupId,
+        clientId,
+        rating: feedbackData.rating,
+        feedback: feedbackData.feedback ? 'provided' : 'none',
+        duration: feedbackData.chatDurationSeconds,
+        messageCount: feedbackData.messageCount
+      });
 
       const result = await mobileMessageService.endChatGroup(chatGroupId, clientId, feedbackData);
 
       // Emit socket notification for chat end
       const io = req.app.get('io');
-      if (io && io.socketConfig) {
-        const notifier = io.socketConfig.getChatGroupNotifier();
-        if (notifier) {
-          notifier.notifyChatGroupEnded(result, clientId);
-        }
+      if (io) {
+        // Create system message for the chat end
+        const systemMessage = {
+          chat_id: `system_${Date.now()}`,
+          chat_body: "Chat ended by customer",
+          chat_group_id: chatGroupId,
+          chat_created_at: result.resolved_at,
+          sys_user_id: null,
+          client_id: null,
+          sender_type: "system"
+        };
+
+        // Broadcast to all users in the chat room
+        const eventData = {
+          chat_group_id: chatGroupId,
+          status: "resolved",
+          resolved_at: result.resolved_at,
+          resolved_by_type: "client",
+          resolved_by_id: clientId,
+          system_message: systemMessage,
+        };
+
+        io.to(`chat_${chatGroupId}`).emit("chatResolved", eventData);
+        console.log(`📱 Chat ${chatGroupId} ended by mobile client ${clientId}`);
       }
 
       res.json({
@@ -152,7 +198,7 @@ class MobileMessageController {
       });
     } catch (err) {
       console.error("❌ Error ending chat group:", err.message);
-      res.status(500).json({ error: "Failed to end chat" });
+      res.status(500).json({ error: err.message || "Failed to end chat" });
     }
   }
 

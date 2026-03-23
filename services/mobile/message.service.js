@@ -175,6 +175,13 @@ class MobileMessageService {
       // Store feedback if provided
       let feedbackRecord = null;
       if (feedbackData.rating || feedbackData.feedback) {
+        console.log('💾 Storing feedback:', {
+          rating: feedbackData.rating,
+          feedback: feedbackData.feedback ? 'provided' : 'none',
+          duration: feedbackData.chatDurationSeconds,
+          messageCount: feedbackData.messageCount
+        });
+
         const { data: feedback, error: feedbackError } = await supabase
           .from("chat_feedback")
           .insert({
@@ -190,15 +197,30 @@ class MobileMessageService {
 
         if (feedbackError) {
           console.warn('⚠️ Failed to save feedback:', feedbackError.message);
+          console.warn('⚠️ Feedback data that failed:', {
+            chat_group_id: chatGroupId,
+            client_id: clientId,
+            rating: feedbackData.rating,
+            feedback_text: feedbackData.feedback,
+            chat_duration_seconds: feedbackData.chatDurationSeconds,
+            message_count: feedbackData.messageCount
+          });
         } else {
           feedbackRecord = feedback;
+          console.log('✅ Feedback saved successfully:', feedback);
           
           // Update chat group with feedback reference
-          await supabase
+          const { error: updateError } = await supabase
             .from("chat_group")
             .update({ feedback_id: feedback.feedback_id })
             .eq("chat_group_id", chatGroupId);
+
+          if (updateError) {
+            console.warn('⚠️ Failed to link feedback to chat group:', updateError.message);
+          }
         }
+      } else {
+        console.log('ℹ️ No feedback provided by client');
       }
 
       return {

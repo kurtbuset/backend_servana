@@ -9,6 +9,7 @@ const chatController = require('../controllers/chat.controller');
 const queueController = require('../controllers/queue.controller');
 const roleController = require('../controllers/role.controller');
 const agentController = require('../controllers/agent.controller');
+const analyticsController = require('../controllers/analytics.controller');
 const clientAccountController = require('../controllers/mobile/clientAccount.controller');
 const otpController = require('../controllers/mobile/otp.controller');
 const mobileDepartmentController = require('../controllers/mobile/department.controller');
@@ -41,6 +42,24 @@ async function setupRoutes(app) {
   // Chat & Communication routes
   app.use('/chat', chatController.getRouter());
   app.use('/auto-replies', autoReplyController.getRouter());
+  
+  // Analytics routes
+  app.use('/analytics', analyticsController.getRouter());
+  
+  // Test endpoint for analytics
+  app.get('/test-analytics', (req, res) => {
+    res.json({ 
+      message: 'Analytics routes are working!',
+      timestamp: new Date().toISOString(),
+      availableRoutes: [
+        'GET /analytics/messages',
+        'GET /analytics/response-time', 
+        'GET /analytics/enhanced-response-time',
+        'GET /analytics/agent-performance',
+        'GET /analytics/dashboard-stats'
+      ]
+    });
+  });
   
   // Role management
   app.use('/roles', roleController.getRouter());
