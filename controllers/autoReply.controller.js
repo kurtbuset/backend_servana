@@ -61,7 +61,7 @@ class AutoReplyController {
   async getAllAutoReplies(req, res) {
     try {
       const autoReplies = await autoReplyService.getAllAutoReplies();
-      res.json(autoReplies);
+      res.json({ data: autoReplies });
     } catch (err) {
       console.error("Error fetching auto replies:", err.message);
       res.status(500).json({ error: "Failed to fetch auto replies" });
@@ -74,7 +74,7 @@ class AutoReplyController {
   async getActiveDepartments(req, res) {
     try {
       const departments = await autoReplyService.getActiveDepartments();
-      res.json(departments);
+      res.json({ data: departments });
     } catch (err) {
       console.error("Error fetching active departments:", err.message);
       res.status(500).json({ error: "Failed to fetch active departments" });
@@ -87,7 +87,7 @@ class AutoReplyController {
   async getAllDepartments(req, res) {
     try {
       const departments = await autoReplyService.getAllDepartments();
-      res.json(departments);
+      res.json({ data: departments });
     } catch (err) {
       console.error("Error fetching all departments:", err.message);
       res.status(500).json({ error: "Failed to fetch departments" });
@@ -106,7 +106,7 @@ class AutoReplyController {
       }
 
       const autoReply = await autoReplyService.createAutoReply(message, dept_id, created_by);
-      res.status(201).json(autoReply);
+      res.status(201).json({ data: autoReply });
     } catch (err) {
       console.error("Error creating auto reply:", err.message);
       res.status(500).json({ error: "Failed to create auto reply" });
@@ -126,7 +126,7 @@ class AutoReplyController {
       }
 
       const autoReply = await autoReplyService.updateAutoReply(id, message, dept_id, updated_by);
-      res.json(autoReply);
+      res.json({ data: autoReply });
     } catch (err) {
       console.error("Error updating auto reply:", err.message);
       res.status(500).json({ error: "Failed to update auto reply" });
@@ -146,7 +146,7 @@ class AutoReplyController {
       }
 
       const autoReply = await autoReplyService.toggleAutoReplyStatus(id, is_active, updated_by);
-      res.json(autoReply);
+      res.json({ data: autoReply });
     } catch (err) {
       console.error("Error toggling auto reply status:", err.message);
       res.status(500).json({ error: "Failed to toggle auto reply status" });
@@ -161,7 +161,7 @@ class AutoReplyController {
       const { id } = req.params;
 
       await autoReplyService.deleteAutoReply(id);
-      res.json({ message: "Auto reply deleted successfully" });
+      res.json({ data: { message: "Auto reply deleted successfully" } });
     } catch (err) {
       console.error("Error deleting auto reply:", err.message);
       res.status(500).json({ error: "Failed to delete auto reply" });

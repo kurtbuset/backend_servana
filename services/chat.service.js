@@ -2,6 +2,7 @@ const supabase = require("../helpers/supabaseClient");
 const cacheService = require("./cache.service");
 const cookie = require("cookie");
 const agentAssignmentService = require("./agentAssignment.service");
+const { determineSenderType, getSenderName, getSenderImageOptimized } = require("../utils/messageHelpers");
 
 class ChatService {
   /**
@@ -14,7 +15,7 @@ class ChatService {
       return messages;
     } catch (error) {
       console.error('❌ Error fetching canned messages:', error.message);
-      return [];
+      throw error;
     }
   }
 
@@ -90,7 +91,7 @@ class ChatService {
       return groups;
     } catch (error) {
       console.error('❌ Error fetching chat groups:', error.message);
-      return [];
+      throw error;
     }
   }
 
@@ -137,69 +138,11 @@ class ChatService {
       return groups;
     } catch (error) {
       console.error('❌ Error fetching resolved chat groups:', error.message);
-      return [];
+      throw error;
     }
   }
 
-  /**
-   * Get profile images for multiple profile IDs - Optimized single query
-   */
-  async getProfileImages(profIds) {
-    if (!profIds || profIds.length === 0) return {};
-
-    // Single query with proper ordering to get current images first, then latest
-    const { data: images, error } = await supabase
-      .from("image")
-      .select("prof_id, img_location, img_is_current, img_created_at")
-      .in("prof_id", profIds)
-      .order("prof_id, img_is_current, img_created_at");
-
-    if (error) throw error;
-
-    const imageMap = {};
-    const processedProfiles = new Set();
-
-    // Process images - first occurrence per profile will be the best match
-    (images || []).forEach((img) => {
-      if (!processedProfiles.has(img.prof_id)) {
-        imageMap[img.prof_id] = img.img_location;
-        processedProfiles.add(img.prof_id);
-      }
-    });
-
-    return imageMap;
-  }
-
-  /**
-   * Get latest message timestamp for chat groups - Optimized query with proper sorting
-   */
-  async getLatestMessageTimes(chatGroupIds) {
-    if (!chatGroupIds || chatGroupIds.length === 0) return {};
-
-    // Optimized query to get latest message per group, sorted by newest first
-    const { data: messages, error } = await supabase
-      .from("chat")
-      .select("chat_group_id, chat_created_at")
-      .in("chat_group_id", chatGroupIds)
-      .not("client_id", "is", null) // Only get messages from clients
-      .order("chat_created_at", { ascending: false }); // Sort by newest first
-
-    if (error) throw error;
-
-    // Create a map of chat_group_id to latest message time
-    const timeMap = {};
-    const processedGroups = new Set();
-
-    // Process messages - first occurrence per group will be the latest due to sorting
-    (messages || []).forEach((msg) => {
-      if (!processedGroups.has(msg.chat_group_id)) {
-        timeMap[msg.chat_group_id] = msg.chat_created_at;
-        processedGroups.add(msg.chat_group_id);
-      }
-    });
-
-    return timeMap;
-  }
+  // getProfileImages and getLatestMessageTimes moved to utils/messageHelpers.js
 
   /**
    * Get chat groups by client ID
@@ -217,8 +160,12 @@ class ChatService {
   /**
    * Get chat messages with pagination and sender information - Optimized with caching
    */
-  async getChatMessages(messageId, before = null, limit = 10, currentUserId = null) {
+  async getChatMessages(messageId, before = null, limit = 30, currentUserId = null) {
     try {
+      // Enforce limit bounds for performance
+      const MAX_LIMIT = 100;
+      const safeLimit = Math.min(parseInt(limit, 10), MAX_LIMIT);
+
       // messageId can be either a chat_group_id or client_id
       // First try to use it as chat_group_id, if that fails, treat as client_id
       
@@ -248,7 +195,7 @@ class ChatService {
 
         if (groupError || !activeGroup) {
           console.log(`❌ No active chat group found for client ${messageId}`);
-          return [];
+          return { messages: [], totalCount: 0 };
         }
 
         chatGroupId = activeGroup.chat_group_id;
@@ -257,21 +204,26 @@ class ChatService {
       
       // Try to get recent messages from cache first
       let cachedMessages = [];
-      if (!before && limit <= 50) {
+      if (!before && safeLimit <= 50) {
         cachedMessages = await cacheService.getChatMessages(chatGroupId);
         
         if (cachedMessages.length > 0) {
           // Sort and limit cached messages
           cachedMessages.sort((a, b) => new Date(b.chat_created_at) - new Date(a.chat_created_at));
-          const limitedMessages = cachedMessages.slice(0, limit);
+          const limitedMessages = cachedMessages.slice(0, safeLimit);
           
           // Process cached messages
-          return limitedMessages.map((msg) => ({
+          const processedMessages = limitedMessages.map((msg) => ({
             ...msg,
-            sender_type: this.determineSenderType(msg, currentUserId),
-            sender_name: this.getSenderName(msg),
-            sender_image: this.getSenderImageOptimized(msg)
+            sender_type: determineSenderType(msg, currentUserId),
+            sender_name: getSenderName(msg),
+            sender_image: getSenderImageOptimized(msg)
           })).reverse();
+
+          return { 
+            messages: processedMessages,
+            totalCount: processedMessages.length
+          };
         }
       }
 
@@ -314,11 +266,13 @@ class ChatService {
         `)
         .eq("chat_group_id", chatGroupId) // Only messages from this specific chat group
         .order("chat_created_at", { ascending: false })
-        .limit(parseInt(limit, 10));
-
+        .limit(safeLimit);
+        
       if (before) {
         query = query.lt("chat_created_at", before);
       }
+
+      console.log(`fetching ${safeLimit} messages`)
 
       const { data: rows, error: chatErr } = await query;
       if (chatErr) throw chatErr;
@@ -356,13 +310,7 @@ class ChatService {
         const transferType = transfer.transfer_type || 'manual';
 
         if (transferType === 'manual') {
-          transferText = toAgent 
-            ? `Chat transferred to ${toDept} - Assigned to ${toAgent}`
-            : `Chat transferred to ${toDept}`;
-        } else if (transferType === 'auto_reassign') {
-          transferText = toAgent
-            ? `Chat automatically reassigned to ${toAgent}`
-            : 'Chat automatically reassigned';
+          transferText = `Chat transferred to ${toDept}`;
         } else if (transferType === 'agent_offline') {
           transferText = 'Chat reassigned (previous agent went offline)';
         } else {
@@ -398,7 +346,7 @@ class ChatService {
       }
 
       // Limit results
-      filteredMessages = filteredMessages.slice(-parseInt(limit, 10));
+      filteredMessages = filteredMessages.slice(-safeLimit);
 
       // Process messages (skip transfer messages as they're already formatted)
       const messages = filteredMessages.map((msg) => {
@@ -407,9 +355,9 @@ class ChatService {
         }
         return {
           ...msg,
-          sender_type: this.determineSenderType(msg, currentUserId),
-          sender_name: this.getSenderName(msg),
-          sender_image: this.getSenderImageOptimized(msg)
+          sender_type: determineSenderType(msg, currentUserId),
+          sender_name: getSenderName(msg),
+          sender_image: getSenderImageOptimized(msg)
         };
       });
 
@@ -418,109 +366,14 @@ class ChatService {
         await cacheService.cacheChatMessages(chatGroupId, messages);
       }
 
-      return messages;
+      return { 
+        messages,
+        totalCount: messages.length
+      };
     } catch (error) {
       console.error('❌ Error fetching chat messages:', error.message);
       throw error;
     }
-  }
-
-  /**
-   * Determine the type of message sender
-   */
-  determineSenderType(message, currentUserId) {
-    if (message.client_id && !message.sys_user_id) {
-      return 'client';
-    } else if (message.sys_user_id) {
-      if (currentUserId && message.sys_user_id === currentUserId) {
-        return 'current_agent';
-      } else {
-        return 'previous_agent';
-      }
-    }
-    return 'system';
-  }
-
-  /**
-   * Get sender display name
-   */
-  getSenderName(message) {
-    if (message.client_id && !message.sys_user_id) {
-      return 'Client';
-    } else if (message.sys_user_id && message.sys_user?.profile) {
-      const firstName = message.sys_user.profile.prof_firstname || '';
-      const lastName = message.sys_user.profile.prof_lastname || '';
-      return `${firstName} ${lastName}`.trim() || 'Agent';
-    } else if (message.sys_user_id) {
-      return 'Agent';
-    }
-    return 'System';
-  }
-
-  /**
-   * Get sender profile image - Optimized version using joined data
-   */
-  getSenderImageOptimized(message) {
-    if (message.client_id && !message.sys_user_id && message.client?.profile?.image) {
-      // Client message - get current image from joined data
-      const images = message.client.profile.image || [];
-      const currentImage = images.find(img => img.img_is_current);
-      return currentImage?.img_location || null;
-    } else if (message.sys_user_id && message.sys_user?.profile?.image) {
-      // Agent message - get current image from joined data
-      const images = message.sys_user.profile.image || [];
-      const currentImage = images.find(img => img.img_is_current);
-      return currentImage?.img_location || null;
-    }
-    return null;
-  }
-
-  /**
-   * Get sender profile image - Legacy version (kept for compatibility)
-   */
-  getSenderImage(message, profileImages) {
-    if (message.client_id && !message.sys_user_id && message.client?.prof_id) {
-      // Client message - get client's profile image
-      return profileImages[message.client.prof_id] || null;
-    } else if (message.sys_user_id && message.sys_user?.prof_id) {
-      // Agent message - get agent's profile image
-      return profileImages[message.sys_user.prof_id] || null;
-    }
-    return null;
-  }
-
-  /**
-   * Authenticate user from socket handshake
-   */
-  async authenticateSocketUser(socket) {
-    const cookies = cookie.parse(socket.handshake.headers.cookie || "");
-    const token = cookies.access_token;
-
-    if (!token) {
-      throw new Error("No access token found in cookies");
-    }
-
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser(token);
-
-    if (error || !user) {
-      throw new Error("Invalid token");
-    }
-
-    // Map supabase user to system_user
-    const { data: userData, error: userFetchError } = await supabase
-      .from("sys_user")
-      .select("sys_user_id")
-      .eq("supabase_user_id", user.id)
-      .single();
-
-    if (userFetchError || !userData) {
-      throw new Error("Failed to fetch system_user");
-    }
-
-    return userData.sys_user_id;
   }
 
   /**
@@ -734,6 +587,36 @@ class ChatService {
       console.error('❌ Error resolving chat group:', error.message);
       throw error;
     }
+  }
+
+  /**
+   * Get transfer details (department names and agent name) for socket emission.
+   * Moves DB lookups out of the controller.
+   */
+  async getTransferDetails(fromDeptId, toDeptId, assignmentResult) {
+    const [fromDeptResult, toDeptResult] = await Promise.all([
+      supabase.from('department').select('dept_name').eq('dept_id', fromDeptId || 0).single(),
+      supabase.from('department').select('dept_name').eq('dept_id', toDeptId).single(),
+    ]);
+
+    let toAgentName = null;
+    if (assignmentResult.assigned && assignmentResult.agentId) {
+      const { data: agentData } = await supabase
+        .from('sys_user')
+        .select('prof_id, profile:profile(prof_firstname, prof_lastname)')
+        .eq('sys_user_id', assignmentResult.agentId)
+        .single();
+
+      if (agentData?.profile) {
+        toAgentName = `${agentData.profile.prof_firstname} ${agentData.profile.prof_lastname}`.trim();
+      }
+    }
+
+    return {
+      fromDeptName: fromDeptResult.data?.dept_name || 'Unknown',
+      toDeptName: toDeptResult.data?.dept_name || 'Unknown',
+      toAgentName,
+    };
   }
 
   /**

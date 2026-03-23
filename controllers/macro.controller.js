@@ -80,7 +80,7 @@ class MacroController {
 
       const roleId = await this.getRoleIdFromType(roleType);
       const result = await macroService.getMacrosByRole(roleId);
-      res.json(result);
+      res.json({ data: result });
     } catch (error) {
       console.error(`Error fetching ${req.params.roleType} macros:`, error);
       res.status(500).json({ error: error.message || "Internal Server Error" });
@@ -115,7 +115,7 @@ class MacroController {
         roleId,
         created_by,
       );
-      res.status(201).json(result);
+      res.status(201).json({ data: result });
     } catch (error) {
       console.error(`Error creating ${req.params.roleType} macro:`, error);
       res.status(500).json({ error: error.message });
@@ -151,7 +151,7 @@ class MacroController {
         dept_id,
         updated_by,
       );
-      res.json(result);
+      res.json({ data: result });
     } catch (error) {
       console.error(`Error updating ${req.params.roleType} macro:`, error);
       res.status(500).json({ error: error.message });
@@ -172,7 +172,7 @@ class MacroController {
       }
 
       const result = await macroService.deleteMacro(id);
-      res.json(result);
+      res.json({ data: result });
     } catch (error) {
       console.error(`Error deleting ${req.params.roleType} macro:`, error);
       res.status(500).json({ error: error.message });

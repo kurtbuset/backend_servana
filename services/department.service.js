@@ -188,71 +188,69 @@ class DepartmentService {
         return [];
       }
 
-      // Now fetch profile and image data for each user
-      const memberPromises = userDepartments
-        .filter(ud => ud.sys_user)
-        .map(async (ud) => {
-          const userId = ud.sys_user.sys_user_id;
+      // Batch fetch all related data instead of per-user queries
+      const validEntries = userDepartments.filter(ud => ud.sys_user);
+      const userIds = validEntries.map(ud => ud.sys_user.sys_user_id);
 
-          // First get the sys_user to get prof_id and last_seen
-          const { data: userWithProf } = await supabase
-            .from("sys_user")
-            .select("prof_id, last_seen")
-            .eq("sys_user_id", userId)
-            .single();
+      // Batch 1: Get prof_id and last_seen for all users
+      const { data: usersWithProf } = await supabase
+        .from("sys_user")
+        .select("sys_user_id, prof_id, last_seen")
+        .in("sys_user_id", userIds);
 
-          let profile = null;
-          let image = null;
+      const userProfMap = {};
+      const profIds = [];
+      (usersWithProf || []).forEach(u => {
+        userProfMap[u.sys_user_id] = u;
+        if (u.prof_id) profIds.push(u.prof_id);
+      });
 
-          // If user has a prof_id, fetch profile and image
-          if (userWithProf?.prof_id) {
-            // Fetch profile
-            const { data: profileData } = await supabase
-              .from("profile")
-              .select("*")
-              .eq("prof_id", userWithProf.prof_id)
-              .single();
-
-            profile = profileData;
-
-            // Fetch current image using prof_id
-            const { data: imageData } = await supabase
-              .from("image")
-              .select("img_id, img_location, img_is_current")
-              .eq("prof_id", userWithProf.prof_id)
+      // Batch 2 & 3: Get profiles and images in parallel
+      const [profilesResult, imagesResult, userDeptsResult] = await Promise.all([
+        profIds.length > 0
+          ? supabase.from("profile").select("*").in("prof_id", profIds)
+          : Promise.resolve({ data: [] }),
+        profIds.length > 0
+          ? supabase.from("image")
+              .select("prof_id, img_id, img_location, img_is_current")
+              .in("prof_id", profIds)
               .eq("img_is_current", true)
-              .single();
+          : Promise.resolve({ data: [] }),
+        supabase.from("sys_user_department")
+          .select(`sys_user_id, dept_id, department (dept_id, dept_name)`)
+          .in("sys_user_id", userIds),
+      ]);
 
-            image = imageData;
-          }
+      // Build lookup maps
+      const profileMap = {};
+      (profilesResult.data || []).forEach(p => { profileMap[p.prof_id] = p; });
 
-          // Fetch all departments for this user
-          const { data: userDepts } = await supabase
-            .from("sys_user_department")
-            .select(`
-              dept_id,
-              department (
-                dept_id,
-                dept_name
-              )
-            `)
-            .eq("sys_user_id", userId);
+      const imageMap = {};
+      (imagesResult.data || []).forEach(img => { imageMap[img.prof_id] = img; });
 
-          const departments = userDepts?.map(ud => ud.department).filter(Boolean) || [];
+      const deptsByUser = {};
+      (userDeptsResult.data || []).forEach(ud => {
+        if (!deptsByUser[ud.sys_user_id]) deptsByUser[ud.sys_user_id] = [];
+        if (ud.department) deptsByUser[ud.sys_user_id].push(ud.department);
+      });
 
-          return {
-            sys_user_id: ud.sys_user.sys_user_id,
-            sys_user_email: ud.sys_user.sys_user_email,
-            sys_user_is_active: ud.sys_user.sys_user_is_active,
-            role: ud.sys_user.role,
-            profile: profile || null,
-            image: image || null,
-            last_seen: userWithProf?.last_seen || null,
-            departments: departments
-          };
-        });
+      // Assemble members from lookup maps (zero additional queries)
+      const members = validEntries.map(ud => {
+        const userId = ud.sys_user.sys_user_id;
+        const userProf = userProfMap[userId];
+        const profId = userProf?.prof_id;
 
-      const members = await Promise.all(memberPromises);
+        return {
+          sys_user_id: userId,
+          sys_user_email: ud.sys_user.sys_user_email,
+          sys_user_is_active: ud.sys_user.sys_user_is_active,
+          role: ud.sys_user.role,
+          profile: (profId && profileMap[profId]) || null,
+          image: (profId && imageMap[profId]) || null,
+          last_seen: userProf?.last_seen || null,
+          departments: deptsByUser[userId] || [],
+        };
+      });
       
       // Cache the result for 30 minutes (department membership changes moderately)
       await cacheService.cache.set('DEPARTMENT', cacheKey, members, 30 * 60);

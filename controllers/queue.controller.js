@@ -3,6 +3,8 @@ const queueService = require("../services/queue.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
 const { checkPermission } = require("../middleware/checkPermission");
 const { PERMISSIONS } = require("../constants/permissions");
+const { formatChatGroups } = require("../utils/formatChatGroups");
+const { getProfileImages, getLatestMessageTimes } = require("../utils/messageHelpers");
 
 class QueueController {
   getRouter() {
@@ -42,7 +44,7 @@ class QueueController {
       const groups = await queueService.getUnassignedChatGroups(userId);
 
       if (!groups || groups.length === 0) {
-        return res.json([]);
+        return res.json({ data: [] });
       }
 
       // Extract profile IDs and chat group IDs
@@ -54,59 +56,13 @@ class QueueController {
 
       // Get profile images and latest message times
       const [imageMap, timeMap] = await Promise.all([
-        queueService.getProfileImages(profIds),
-        queueService.getLatestMessageTimes(chatGroupIds),
+        getProfileImages(profIds),
+        getLatestMessageTimes(chatGroupIds),
       ]);
 
-      // Format response
-      const formatted = groups.map((group) => {
-        const client = group.client;
-        if (!client) return null;
+      const sortedFormatted = formatChatGroups(groups, imageMap, timeMap);
 
-        const fullName = client.profile
-          ? `${client.profile.prof_firstname} ${client.profile.prof_lastname}`
-          : "Unknown Client";
-
-        // Get latest message time or use current time as fallback
-        const latestTime = timeMap[group.chat_group_id];
-        const displayTime = latestTime
-          ? new Date(latestTime).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })
-          : new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-
-        return {
-          chat_group_id: group.chat_group_id,
-          chat_group_name: fullName,
-          department: group.department?.dept_name || "Unknown",
-          customer: {
-            id: client.client_id,
-            chat_group_id: group.chat_group_id,
-            name: fullName,
-            number: client.client_number,
-            profile: imageMap[client.prof_id] || null,
-            time: displayTime,
-            status: group.status, // Include the actual status (queued or transferred)
-          },
-          // Include raw timestamp for sorting
-          latestMessageTime: latestTime || new Date().toISOString(),
-        };
-      });
-
-      // Sort by latest message time (newest first) and remove the sorting field
-      const sortedFormatted = formatted
-        .filter(Boolean)
-        .sort(
-          (a, b) =>
-            new Date(b.latestMessageTime) - new Date(a.latestMessageTime),
-        )
-        .map(({ latestMessageTime, ...rest }) => rest);
-
-      res.json(sortedFormatted);
+      res.json({ data: sortedFormatted });
     } catch (err) {
       console.error("❌ Error fetching chat groups:", err);
       res.status(500).json({ error: "Failed to fetch chat groups" });
@@ -165,15 +121,13 @@ class QueueController {
         }
       }
 
-      res.json({
+      res.json({ data: {
         success: true,
         message: "Chat accepted successfully",
-        data: {
-          chat_group_id: chatGroup.chat_group_id,
-          sys_user_id: chatGroup.sys_user_id,
-          status: chatGroup.status,
-        },
-      });
+        chat_group_id: chatGroup.chat_group_id,
+        sys_user_id: chatGroup.sys_user_id,
+        status: chatGroup.status,
+      } });
     } catch (err) {
       console.error("❌ Error accepting chat:", err);
 
@@ -239,7 +193,7 @@ class QueueController {
         userId,
       );
 
-      res.json({ messages });
+      res.json({ data: { messages } });
     } catch (err) {
       console.error("❌ Error fetching messages:", err);
       res.status(500).json({ error: err.message });

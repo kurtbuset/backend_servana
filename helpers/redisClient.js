@@ -149,6 +149,26 @@ class RedisCacheManager {
   }
 
   /**
+   * Delete all keys matching a prefix
+   */
+  async deleteByPrefix(prefix) {
+    if (!this.isConnected) return false;
+
+    try {
+      const pattern = `${this.keyPrefixes[prefix]}*`;
+      const keys = await this.client.keys(pattern);
+      if (keys.length > 0) {
+        await this.client.del(keys);
+        console.log(`✅ Cache DELETE by prefix: ${pattern} (${keys.length} keys)`);
+      }
+      return true;
+    } catch (error) {
+      console.error(`❌ Cache DELETE by prefix error for ${prefix}:`, error.message);
+      return false;
+    }
+  }
+
+  /**
    * WRITE-THROUGH OPERATIONS
    * For critical data that must stay consistent
    */

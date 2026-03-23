@@ -1,14 +1,23 @@
 const express = require("express");
+const rateLimit = require("express-rate-limit");
 const authService = require("../services/auth.service");
 const profileService = require("../services/profile.service");
 const sessionService = require("../services/session.service");
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 attempts per window
+  message: { error: "Too many login attempts, please try again later" },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 class AuthController {
   getRouter() {
     const router = express.Router();
 
     // Login
-    router.post("/login", (req, res) => this.login(req, res));
+    router.post("/login", loginLimiter, (req, res) => this.login(req, res));
 
     // Refresh token
     router.post("/refresh", (req, res) => this.refreshToken(req, res));
@@ -108,11 +117,11 @@ class AuthController {
         }
       }
 
-      res.json({
+      res.json({ data: {
         message: "Login successful",
         user: { sys_user_id: sysUser.sys_user_id, role_id: sysUser.role_id },
-        session_id: sessionId // Include session ID in response
-      });
+        session_id: sessionId
+      } });
     } catch (err) {
       console.error("Login error:", err.message);
 
@@ -170,11 +179,11 @@ class AuthController {
         }
       }
 
-      res.json({
+      res.json({ data: {
         message: "Token refreshed successfully",
         access_token: session.access_token,
         expires_at: session.expires_at
-      });
+      } });
     } catch (err) {
       console.error("Token refresh error:", err.message);
       
@@ -217,7 +226,7 @@ class AuthController {
 
       const sysUserId = await authService.getSystemUserIdFromToken(token);
 
-      res.json({ sys_user_id: sysUserId });
+      res.json({ data: { sys_user_id: sysUserId } });
     } catch (err) {
       console.error("Get user ID error:", err.message);
 
@@ -251,7 +260,7 @@ class AuthController {
         return res.status(401).json({ error: "Session expired or invalid" });
       }
 
-      res.json({
+      res.json({ data: {
         message: "Session valid",
         session: {
           userId: sessionData.userId,
@@ -260,7 +269,7 @@ class AuthController {
           createdAt: sessionData.createdAt,
           lastAccessed: sessionData.lastAccessed
         }
-      });
+      } });
     } catch (error) {
       console.error("Check session error:", error.message);
       res.status(500).json({ error: "Session check failed" });
@@ -332,7 +341,7 @@ class AuthController {
         sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
       });
 
-      res.json({ message: "Logged out" });
+      res.json({ data: { message: "Logged out" } });
     } catch (error) {
       console.error("Logout error:", error.message);
       res.status(500).json({ error: "Logout failed" });

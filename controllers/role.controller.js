@@ -49,7 +49,7 @@ class RoleController {
   async getAllRoles(req, res) {
     try {
       const roles = await roleService.getAllRoles();
-      res.json(roles);
+      res.json({ data: roles });
     } catch (err) {
       console.error("Error fetching roles:", err.message);
       res.status(500).json({ error: "Failed to fetch roles" });
@@ -69,7 +69,7 @@ class RoleController {
 
       const roleData = await roleService.createRole(name, permissions, created_by);
 
-      res.json({ message: "Role created", role: roleData });
+      res.json({ data: { message: "Role created", role: roleData } });
     } catch (err) {
       console.error("Error creating role:", err.message);
       res.status(500).json({ error: err.message });
@@ -99,7 +99,7 @@ class RoleController {
       // Update role details
       await roleService.updateRole(roleId, name, active, updated_by);
 
-      res.json({ message: "Role updated" });
+      res.json({ data: { message: "Role updated" } });
     } catch (err) {
       console.error("Error updating role:", err.message);
 
@@ -124,11 +124,11 @@ class RoleController {
 
       const members = await roleService.getRoleMembers(roleId);
 
-      res.json({
+      res.json({ data: {
         roleId: roleId,
         members: members,
         totalCount: members.length
-      });
+      } });
     } catch (err) {
       console.error("Error fetching role members:", err.message);
       res.status(500).json({ error: "Failed to fetch role members" });
@@ -165,7 +165,7 @@ class RoleController {
       // Update the permission
       await roleService.updateUserChatPermission(userId, value);
 
-      res.json({
+      res.json({ data: {
         success: true,
         message: "Member permission updated successfully",
         updatedUser: {
@@ -173,7 +173,7 @@ class RoleController {
           permission: permission,
           value: value
         }
-      });
+      } });
     } catch (err) {
       console.error("Error updating member permission:", err.message);
       res.status(500).json({ error: "Failed to update member permission" });

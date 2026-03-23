@@ -1,4 +1,5 @@
 const supabase = require("../helpers/supabaseClient");
+const { AGENT_STATUS_VALUES } = require("../constants/statuses");
 
 class AuthService {
   /**
@@ -95,7 +96,7 @@ class AuthService {
    * Update agent status
    */
   async updateAgentStatus(userId, status) {
-    const validStatuses = ['accepting_chats', 'not_accepting_chats', 'offline'];
+    const validStatuses = AGENT_STATUS_VALUES;
     
     if (!validStatuses.includes(status)) {
       throw new Error(`Invalid agent status: ${status}`);

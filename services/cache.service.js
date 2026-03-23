@@ -84,8 +84,12 @@ class CacheService {
   }
 
   async invalidateCannedMessages(roleId, userId = null) {
-    const cacheKey = userId ? `${roleId}_${userId}` : roleId;
-    return await this.cache.delete('CANNED_MESSAGES', cacheKey);
+    if (roleId) {
+      const cacheKey = userId ? `${roleId}_${userId}` : roleId;
+      return await this.cache.delete('CANNED_MESSAGES', cacheKey);
+    }
+    // If no roleId provided, invalidate all canned message keys
+    return await this.cache.deleteByPrefix('CANNED_MESSAGES');
   }
 
   /**

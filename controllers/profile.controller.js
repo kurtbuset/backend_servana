@@ -129,7 +129,7 @@ class ProfileController {
         image,
       };
 
-      res.json(responseData);
+      res.json({ data: responseData });
     } catch (err) {
       console.error("Error fetching profile:", err.message);
       
@@ -165,7 +165,7 @@ class ProfileController {
         dateOfBirth,
       });
 
-      res.json({ message: "Profile updated successfully" });
+      res.json({ data: { message: "Profile updated successfully" } });
     } catch (err) {
       console.error("Error updating profile:", err.message);
       
@@ -200,11 +200,11 @@ class ProfileController {
       // Insert new image as current
       const inserted = await profileService.insertProfileImage(profId, publicUrl);
 
-      res.json({
+      res.json({ data: {
         message: "Image uploaded successfully",
         img_location: publicUrl,
         image: inserted,
-      });
+      } });
     } catch (err) {
       console.error("Error uploading profile image:", err.message);
       
@@ -225,9 +225,9 @@ class ProfileController {
 
       const agentStatus = await profileService.getAgentStatus(sysUserId);
 
-      res.json({ 
-        agent_status: agentStatus 
-      });
+      res.json({ data: {
+        agent_status: agentStatus
+      } });
     } catch (err) {
       console.error("Error fetching agent status:", err.message);
       
@@ -262,10 +262,10 @@ class ProfileController {
         console.log(`📡 Broadcasted agent status change via REST API: ${agent_status}`);
       }
 
-      res.json({ 
+      res.json({ data: {
         message: "Agent status updated successfully",
-        agent_status 
-      });
+        agent_status
+      } });
     } catch (err) {
       console.error("Error updating agent status:", err.message);
       

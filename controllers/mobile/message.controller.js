@@ -1,6 +1,7 @@
 const express = require("express");
 const mobileMessageService = require("../../services/mobile/message.service");
 const getCurrentMobileUser = require("../../middleware/getCurrentMobileUser");
+const { parseDurationToSeconds } = require("../../utils/parseDuration");
 
 class MobileMessageController {
   getRouter() {
@@ -43,7 +44,7 @@ class MobileMessageController {
 
       const data = await mobileMessageService.createMessage(chat_body, client_id, chat_group_id);
 
-      res.status(201).json(data);
+      res.status(201).json({ data });
     } catch (err) {
       console.error("Failed to insert chat:", err.message);
       res.status(500).json({ error: "Failed to insert chat" });
@@ -56,16 +57,36 @@ class MobileMessageController {
   async getMessagesByGroupId(req, res) {
     try {
       const { id } = req.params;
-      const { before, limit = 10 } = req.query;
+      const { before, limit } = req.query;
+      const clientId = req.userId; // Current client ID from auth middleware
 
-      // Validate limit parameter
-      const messageLimit = Math.min(Math.max(parseInt(limit) || 10, 1), 50); // Between 1-50 messages
+      // Pagination limits for performance (aligned with web API)
+      const DEFAULT_LIMIT = 30;
+      const MAX_LIMIT = 100;
+      const MIN_LIMIT = 10;
 
-      const data = await mobileMessageService.getMessagesByGroupId(id, before, messageLimit);
+      // Parse and validate limit
+      const requestedLimit = parseInt(limit) || DEFAULT_LIMIT;
+      const safeLimit = Math.max(MIN_LIMIT, Math.min(requestedLimit, MAX_LIMIT));
 
-      res.json(data);
+      console.log('📱 Mobile message request:', { chatGroupId: id, before, limit: safeLimit, clientId });
+
+      const result = await mobileMessageService.getMessagesByGroupId(id, before, safeLimit, clientId);
+
+      // Add pagination metadata for better client-side handling
+      const response = {
+        messages: result.messages || result,
+        pagination: {
+          limit: safeLimit,
+          hasMore: result.hasMore || false,
+          oldestTimestamp: result.oldestTimestamp || null,
+          count: result.count || (result.messages || result).length
+        }
+      };
+
+      res.json({ data: response });
     } catch (err) {
-      console.error("Failed to fetch messages:", err.message);
+      console.error("❌ Failed to fetch messages:", err.message);
       res.status(500).json({ error: "Failed to fetch messages" });
     }
   }
@@ -79,7 +100,7 @@ class MobileMessageController {
 
       const chatGroup = await mobileMessageService.getLatestChatGroup(clientId);
 
-      res.status(200).json(chatGroup);
+      res.status(200).json({ data: chatGroup });
     } catch (err) {
       console.error("❌ Could not retrieve latest chat group:", err.message);
       res.status(404).json({ error: err.message });
@@ -109,7 +130,7 @@ class MobileMessageController {
         }
       }
 
-      res.status(201).json(result);
+      res.status(201).json({ data: result });
     } catch (err) {
       console.error("Error creating chat group:", err.message);
       res.status(500).json({ error: "Failed to create chat group" });
@@ -131,7 +152,7 @@ class MobileMessageController {
 
       // Convert duration from formatted string to seconds if provided
       if (feedbackData.chatDuration) {
-        feedbackData.chatDurationSeconds = this.parseDurationToSeconds(feedbackData.chatDuration);
+        feedbackData.chatDurationSeconds = parseDurationToSeconds(feedbackData.chatDuration);
       }
 
       const result = await mobileMessageService.endChatGroup(chatGroupId, clientId, feedbackData);
@@ -145,11 +166,11 @@ class MobileMessageController {
         }
       }
 
-      res.json({
+      res.json({ data: {
         success: true,
         message: "Chat ended successfully",
-        data: result
-      });
+        result
+      } });
     } catch (err) {
       console.error("❌ Error ending chat group:", err.message);
       res.status(500).json({ error: "Failed to end chat" });
@@ -165,30 +186,13 @@ class MobileMessageController {
 
       const resolvedChats = await mobileMessageService.getResolvedChats(clientId);
 
-      res.json(resolvedChats);
+      res.json({ data: resolvedChats });
     } catch (err) {
       console.error("❌ Error fetching resolved chats:", err.message);
       res.status(500).json({ error: "Failed to fetch chat history" });
     }
   }
 
-  // Helper method to parse duration string to seconds
-  parseDurationToSeconds(durationStr) {
-    if (!durationStr || typeof durationStr !== 'string') return null;
-    
-    let totalSeconds = 0;
-    
-    // Parse formats like "1h 30m", "45m 20s", "30s"
-    const hourMatch = durationStr.match(/(\d+)h/);
-    const minuteMatch = durationStr.match(/(\d+)m/);
-    const secondMatch = durationStr.match(/(\d+)s/);
-    
-    if (hourMatch) totalSeconds += parseInt(hourMatch[1]) * 3600;
-    if (minuteMatch) totalSeconds += parseInt(minuteMatch[1]) * 60;
-    if (secondMatch) totalSeconds += parseInt(secondMatch[1]);
-    
-    return totalSeconds > 0 ? totalSeconds : null;
-  }
 }
 
 module.exports = new MobileMessageController();
