@@ -260,6 +260,25 @@ class AgentAssignmentService {
         throw new Error("Chat group not found or already assigned");
       }
 
+      // Update the most recent transfer log for this chat group with to_agent_id
+      // This handles cases where chat was transferred but no agent was available (queued)
+      const { error: updateLogError } = await supabase
+        .from("chat_transfer_log")
+        .update({
+          to_agent_id: agentId
+        })
+        .eq("chat_group_id", chatGroupId)
+        .is("to_agent_id", null) // Only update if to_agent_id is still null
+        .order("transferred_at", { ascending: false })
+        .limit(1);
+
+      if (updateLogError) {
+        console.error("⚠️ Failed to update transfer log with to_agent_id:", updateLogError.message);
+        // Don't throw - assignment succeeded, log update is secondary
+      } else {
+        console.log(`✅ Updated transfer log for chat ${chatGroupId} with to_agent_id: ${agentId}`);
+      }
+
       // Invalidate cache
       await cacheService.invalidateChatGroup(chatGroupId);
 

@@ -36,7 +36,7 @@ class ChangeRoleController {
   async getAllUsersWithRoles(req, res) {
     try {
       const users = await changeRoleService.getAllUsersWithRoles();
-      res.status(200).json(users);
+      res.status(200).json({ data: users });
     } catch (err) {
       console.error("Error fetching users:", err.message);
       res.status(500).json({ error: "Failed to fetch users" });
@@ -49,7 +49,7 @@ class ChangeRoleController {
   async getAllRoles(req, res) {
     try {
       const roles = await changeRoleService.getAllRoles();
-      res.status(200).json(roles);
+      res.status(200).json({ data: roles });
     } catch (err) {
       console.error("Error fetching roles:", err.message);
       res.status(500).json({ error: "Failed to fetch roles" });
@@ -72,7 +72,7 @@ class ChangeRoleController {
         updatedBy
       );
 
-      res.status(200).json(updatedUser);
+      res.status(200).json({ data: updatedUser });
     } catch (err) {
       console.error("Error updating user:", err.message);
       res.status(500).json({ error: "Failed to update user" });

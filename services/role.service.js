@@ -1,4 +1,5 @@
 const supabase = require("../helpers/supabaseClient");
+const cacheService = require("./cache.service");
 
 // Permission label-to-column mapping
 const permissionMap = {
@@ -158,6 +159,7 @@ class RoleService {
       .eq("priv_id", privId);
 
     if (error) throw error;
+    await cacheService.invalidateRoles();
   }
 
   /**
@@ -174,6 +176,7 @@ class RoleService {
       .eq("role_id", roleId);
 
     if (error) throw error;
+    await cacheService.invalidateRoles();
   }
 
   /**

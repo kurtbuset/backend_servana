@@ -14,19 +14,7 @@ const clientAccountController = require('../controllers/mobile/clientAccount.con
 const otpController = require('../controllers/mobile/otp.controller');
 const mobileDepartmentController = require('../controllers/mobile/department.controller');
 const mobileMessageController = require('../controllers/mobile/message.controller');
-const roleService = require('../services/role.service');
-
 async function setupRoutes(app) {
-  // Health check endpoint for mobile testing
-  app.get('/health', (req, res) => {
-    res.json({ 
-      status: 'OK', 
-      message: 'Server is running',
-      timestamp: new Date().toISOString(),
-      ip: req.ip || req.connection.remoteAddress
-    });
-  });
-
   // Auth routes
   app.use('/auth', authController.getRouter());
   

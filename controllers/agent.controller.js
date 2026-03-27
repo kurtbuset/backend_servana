@@ -43,7 +43,7 @@ class AgentController {
   async getAllAgents(req, res) {
     try {
       const agents = await agentService.getAllAgents();
-      res.status(200).json(agents);
+      res.status(200).json({ data: agents });
     } catch (err) {
       console.error("❌ Error fetching agents:", err.message);
       res.status(500).json({ error: err.message });
@@ -56,7 +56,7 @@ class AgentController {
   async getActiveDepartments(req, res) {
     try {
       const departments = await agentService.getActiveDepartments();
-      res.status(200).json(departments);
+      res.status(200).json({ data: departments });
     } catch (err) {
       console.error("❌ Error fetching departments:", err.message);
       res.status(500).json({ error: err.message });
@@ -98,7 +98,7 @@ class AgentController {
         await agentService.updateAuthUser(authUserId, email, password);
       }
 
-      res.status(200).json({ message: "Agent updated successfully" });
+      res.status(200).json({ data: { message: "Agent updated successfully" } });
     } catch (err) {
       console.error("❌ Error updating agent:", err.message);
       res.status(500).json({ error: err.message });
@@ -118,7 +118,7 @@ class AgentController {
 
       const result = await agentService.createAgent(email, password, departments, role_id);
 
-      res.status(201).json(result);
+      res.status(201).json({ data: result });
     } catch (err) {
       console.error("❌ Error adding new agent:", err.message);
       res.status(500).json({ error: err.message });

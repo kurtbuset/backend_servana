@@ -52,7 +52,7 @@ class DepartmentController {
   async getAllDepartments(req, res) {
     try {
       const departments = await departmentService.getAllDepartments();
-      res.status(200).json(departments);
+      res.status(200).json({ data: departments });
     } catch (err) {
       console.error("Error fetching departments:", err.message);
       res.status(500).json({ error: "Failed to fetch departments" });
@@ -71,7 +71,7 @@ class DepartmentController {
       }
 
       const department = await departmentService.createDepartment(dept_name, dept_created_by);
-      res.status(201).json(department);
+      res.status(201).json({ data: department });
     } catch (err) {
       console.error("Error adding department:", err.message);
       res.status(500).json({ error: "Failed to add department" });
@@ -96,7 +96,7 @@ class DepartmentController {
       };
 
       const department = await departmentService.updateDepartment(id, updateData);
-      res.status(200).json(department);
+      res.status(200).json({ data: department });
     } catch (err) {
       console.error("Error updating department:", err.message);
       res.status(500).json({ error: "Failed to update department" });
@@ -116,7 +116,7 @@ class DepartmentController {
       }
 
       const department = await departmentService.toggleDepartmentStatus(id, dept_is_active, dept_updated_by);
-      res.status(200).json(department);
+      res.status(200).json({ data: department });
     } catch (err) {
       console.error("Error toggling department active status:", err.message);
       res.status(500).json({ error: "Failed to toggle department status" });
@@ -132,7 +132,7 @@ class DepartmentController {
 
       const members = await departmentService.getDepartmentMembers(id);
 
-      res.status(200).json({ members });
+      res.status(200).json({ data: { members } });
     } catch (err) {
       console.error("Error fetching department members:", err.message);
       res.status(500).json({ error: "Failed to fetch department members" });
@@ -149,7 +149,7 @@ class DepartmentController {
 
       const members = await departmentService.getDepartmentMembers(id);
 
-      res.status(200).json({ members });
+      res.status(200).json({ data: { members } });
     } catch (err) {
       console.error("Error viewing department members:", err.message);
       res.status(500).json({ error: "Failed to view department members" });

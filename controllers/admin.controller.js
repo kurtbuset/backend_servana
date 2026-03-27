@@ -43,10 +43,7 @@ class AdminController {
   async getAllAdmins(req, res) {
     try {
       const admins = await adminService.getAllAdmins();
-      res.status(200).json({
-        admins,
-        currentUserId: req.userId,
-      });
+      res.status(200).json({ data: { admins, currentUserId: req.userId } });
     } catch (err) {
       console.error("Error fetching admins:", err.message);
       res.status(500).json({ error: "Failed to fetch admins" });
@@ -70,7 +67,7 @@ class AdminController {
         sys_user_created_by
       );
 
-      res.status(201).json(admin);
+      res.status(201).json({ data: admin });
     } catch (err) {
       console.error("Error adding admin:", err.message);
       res.status(400).json({ error: err.message });
@@ -97,7 +94,7 @@ class AdminController {
         sys_user_updated_by
       );
 
-      res.status(200).json(admin);
+      res.status(200).json({ data: admin });
     } catch (err) {
       console.error("Error updating admin:", err.message);
       res.status(500).json({ error: "Failed to update admin" });
@@ -120,7 +117,7 @@ class AdminController {
 
       const admin = await adminService.toggleAdminStatus(id, sys_user_is_active, sys_user_updated_by);
 
-      res.status(200).json(admin);
+      res.status(200).json({ data: admin });
     } catch (err) {
       console.error("Error toggling admin active status:", err.message);
       res.status(500).json({ error: "Failed to toggle admin status" });

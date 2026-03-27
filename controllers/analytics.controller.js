@@ -53,8 +53,7 @@ class AnalyticsController {
       const validPeriods = ['daily', 'weekly', 'monthly', 'yearly'];
       if (!validPeriods.includes(period)) {
         return res.status(400).json({
-          success: false,
-          message: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
+          error: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
         });
       }
 
@@ -75,16 +74,10 @@ class AnalyticsController {
 
       const data = await AnalyticsService.getMessageAnalytics(period, agentId, dateParams);
       
-      res.json({
-        success: true,
-        data
-      });
+      res.json({ data });
     } catch (error) {
       console.error('Error in getMessageAnalytics:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to fetch message analytics'
-      });
+      res.status(500).json({ error: error.message || 'Failed to fetch message analytics' });
     }
   }
 
@@ -100,8 +93,7 @@ class AnalyticsController {
       const validPeriods = ['daily', 'weekly', 'monthly', 'yearly'];
       if (!validPeriods.includes(period)) {
         return res.status(400).json({
-          success: false,
-          message: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
+          error: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
         });
       }
 
@@ -119,16 +111,10 @@ class AnalyticsController {
 
       const data = await AnalyticsService.getResponseTimeAnalytics(period, dateParams);
       
-      res.json({
-        success: true,
-        data
-      });
+      res.json({ data });
     } catch (error) {
       console.error('Error in getResponseTimeAnalytics:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to fetch response time analytics'
-      });
+      res.status(500).json({ error: error.message || 'Failed to fetch response time analytics' });
     }
   }
 
@@ -420,16 +406,10 @@ class AnalyticsController {
 
       const data = await AnalyticsService.getDashboardStats(dateParams);
       
-      res.json({
-        success: true,
-        data
-      });
+      res.json({ data });
     } catch (error) {
       console.error('Error in getDashboardStats:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to fetch dashboard statistics'
-      });
+      res.status(500).json({ error: error.message || 'Failed to fetch dashboard statistics' });
     }
   }
 

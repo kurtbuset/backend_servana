@@ -71,19 +71,17 @@ class AdminService {
   }
 
   /**
-   * Create a new admin
+   * Create a new admin using atomic RPC (with manual fallback)
    */
   async createAdmin(email, password, createdBy) {
     let supabaseUserId = null;
-    let profileId = null;
-    let newUserId = null;
 
     try {
       console.log(`🔄 Creating admin: ${email}`);
 
       const adminRoleId = await this.getAdminRoleId();
 
-      // Step 1: Create user in Supabase Auth
+      // Step 1: Create user in Supabase Auth (external, cannot be in DB transaction)
       const { data: createdUser, error: authErr } = await supabase.auth.admin.createUser({
         email,
         password,
@@ -98,66 +96,34 @@ class AdminService {
       supabaseUserId = createdUser.user.id;
       console.log(`✅ Auth user created: ${supabaseUserId}`);
 
-      // Step 2: Create profile
-      const profile = await profileService.createMinimalProfile();
-      profileId = profile.prof_id;
-      console.log(`✅ Profile created: ${profileId}`);
+      // Step 2: Create profile + sys_user atomically via RPC
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('create_admin_atomic', {
+        p_email: email,
+        p_role_id: adminRoleId,
+        p_created_by: createdBy,
+        p_supabase_user_id: supabaseUserId,
+      });
 
-      // Step 3: Insert into sys_user table with profile link
-      const { data, error } = await supabase
-        .from("sys_user")
-        .insert([
-          {
-            sys_user_email: email,
-            sys_user_is_active: true,
-            role_id: adminRoleId,
-            prof_id: profileId, // Link to the created profile
-            sys_user_created_by: createdBy,
-            sys_user_updated_by: createdBy,
-            supabase_user_id: supabaseUserId,
-          },
-        ])
-        .select("sys_user_id, sys_user_email, sys_user_is_active, supabase_user_id")
-        .single();
-
-      if (error) {
-        console.error('❌ System user creation failed:', error);
-        throw error;
+      if (rpcError) {
+        console.error('❌ Atomic admin creation failed:', rpcError.message);
+        throw rpcError;
       }
 
-      newUserId = data.sys_user_id;
-      console.log(`✅ System user created: ${newUserId}`);
       console.log(`✅ Admin creation completed successfully: ${email}`);
-
-      return data;
+      return rpcResult;
 
     } catch (error) {
       console.error(`❌ Admin creation failed for ${email}:`, error.message);
 
-      // Rollback operations in reverse order
-      try {
-        // Remove system user if created
-        if (newUserId) {
-          console.log(`🔄 Rolling back system user: ${newUserId}`);
-          await supabase.from("sys_user").delete().eq("sys_user_id", newUserId);
-        }
-
-        // Remove profile if created
-        if (profileId) {
-          console.log(`🔄 Rolling back profile: ${profileId}`);
-          await supabase.from("profile").delete().eq("prof_id", profileId);
-        }
-
-        // Remove auth user if created
-        if (supabaseUserId) {
+      // Only need to rollback auth user — DB operations are atomic via RPC
+      if (supabaseUserId) {
+        try {
           console.log(`🔄 Rolling back auth user: ${supabaseUserId}`);
           await supabase.auth.admin.deleteUser(supabaseUserId);
+          console.log('✅ Auth rollback completed');
+        } catch (rollbackError) {
+          console.error('❌ Auth rollback failed:', rollbackError.message);
         }
-
-        console.log('✅ Rollback completed successfully');
-      } catch (rollbackError) {
-        console.error('❌ Rollback failed:', rollbackError.message);
-        // Don't throw rollback error, throw original error
       }
 
       throw error;

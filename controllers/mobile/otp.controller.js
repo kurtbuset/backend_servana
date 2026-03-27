@@ -1,14 +1,23 @@
 const express = require("express");
+const rateLimit = require("express-rate-limit");
 const otpService = require("../../services/mobile/otp.service");
 const clientAccountService = require("../../services/mobile/clientAccount.service");
+
+const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // 5 OTP requests per window
+  message: { error: "Too many OTP requests, please try again later" },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 class OtpController {
   getRouter() {
     const router = express.Router();
 
     // Public routes (no authentication required)
-    router.post("/request-otp", (req, res) => this.requestOtp(req, res));
-    router.post("/verify-otp", (req, res) => this.verifyOtp(req, res));
+    router.post("/request-otp", otpLimiter, (req, res) => this.requestOtp(req, res));
+    router.post("/verify-otp", otpLimiter, (req, res) => this.verifyOtp(req, res));
 
     // Global error handler
     router.use((err, req, res, next) => {
@@ -58,11 +67,11 @@ class OtpController {
       //   `Your verification code is: ${result.otp}`
       // );
 
-      res.json({
+      res.json({ data: {
         message: "OTP sent successfully",
         is_new_user: result.isNewUser,
         otp_expires_in: result.expiresIn,
-      });
+      } });
     } catch (err) {
       console.error("Request OTP error:", err);
 
@@ -118,13 +127,13 @@ class OtpController {
         client.client_number,
       );
 
-      res.json({
+      res.json({ data: {
         message: "Authenticated successfully",
         is_new_user: isNewUser,
         requires_profile: !client.prof_id,
         token,
         client,
-      });
+      } });
     } catch (err) {
       console.error("Verify OTP error:", err);
 

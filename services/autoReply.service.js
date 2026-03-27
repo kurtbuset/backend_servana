@@ -1,4 +1,5 @@
 const supabase = require("../helpers/supabaseClient");
+const cacheService = require("./cache.service");
 
 class AutoReplyService {
   /**
@@ -64,6 +65,7 @@ class AutoReplyService {
       .select();
 
     if (error) throw error;
+    await cacheService.invalidateAutoReplies();
     return data[0];
   }
 
@@ -88,6 +90,7 @@ class AutoReplyService {
       .select();
 
     if (error) throw error;
+    await cacheService.invalidateAutoReplies();
     return data[0];
   }
 
@@ -106,6 +109,7 @@ class AutoReplyService {
       .select();
 
     if (error) throw error;
+    await cacheService.invalidateAutoReplies();
     return data[0];
   }
 }

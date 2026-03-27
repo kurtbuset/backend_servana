@@ -113,7 +113,7 @@ function initializeSocket(server, allowedOrigins) {
     }
 
     // Join chat room
-    socket.on("joinChatGroup", async ({ chatGroupId }) => {
+    socket.on("chat:join", async ({ chatGroupId }) => {
       try {
         if (!chatGroupId) {
           socket.emit("error", { message: "Chat group ID is required" });

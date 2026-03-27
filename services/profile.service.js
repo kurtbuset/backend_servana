@@ -1,5 +1,7 @@
 const supabase = require("../helpers/supabaseClient");
 const { v4: uuidv4 } = require("uuid");
+const cacheService = require("./cache.service");
+const { AGENT_STATUS, AGENT_STATUS_VALUES } = require("../constants/statuses");
 
 class ProfileService {
   /**
@@ -87,6 +89,7 @@ class ProfileService {
       .eq("sys_user_id", sysUserId);
 
     if (error) throw error;
+    await cacheService.invalidateUserProfile(sysUserId);
   }
 
   /**
@@ -106,6 +109,8 @@ class ProfileService {
       .eq("prof_id", profId);
 
     if (error) throw error;
+    // Invalidate by prefix since we have profId, not sysUserId
+    await cacheService.cache.deleteByPrefix('USER_PROFILE');
   }
 
   /**
@@ -503,7 +508,7 @@ class ProfileService {
         throw new Error("User not found");
       }
 
-      return userRow.agent_status || 'offline';
+      return userRow.agent_status || AGENT_STATUS.OFFLINE;
     } catch (error) {
       console.error(`❌ Error getting agent status for user ${sysUserId}:`, error.message);
       throw error;
@@ -514,7 +519,7 @@ class ProfileService {
    * Update agent status
    */
   async updateAgentStatus(sysUserId, status) {
-    const validStatuses = ['accepting_chats', 'not_accepting_chats', 'offline'];
+    const validStatuses = AGENT_STATUS_VALUES;
     
     if (!validStatuses.includes(status)) {
       throw new Error(`Invalid agent status: ${status}`);
@@ -522,13 +527,14 @@ class ProfileService {
 
     const { error } = await supabase
       .from("sys_user")
-      .update({ 
+      .update({
         agent_status: status,
         sys_user_updated_at: new Date().toISOString()
       })
       .eq("sys_user_id", sysUserId);
 
     if (error) throw error;
+    await cacheService.invalidateUserProfile(sysUserId);
   }
 }
 

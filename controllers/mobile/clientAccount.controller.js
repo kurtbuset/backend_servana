@@ -46,10 +46,10 @@ class ClientAccountController {
       // Call service layer
       const client = await clientAccountService.validateTokenFlow(clientId);
 
-      res.json({
+      res.json({ data: {
         message: "Token is valid",
         client,
-      });
+      } });
     } catch (err) {
       console.error("Validate token error:", err);
 
@@ -87,12 +87,12 @@ class ClientAccountController {
         lastname,
       );
 
-      res.json({
+      res.json({ data: {
         message: result.isUpdate
           ? "Profile updated successfully"
           : "Profile created successfully",
         profile: result.profile,
-      });
+      } });
     } catch (err) {
       console.error("Complete profile error:", err);
 
@@ -123,10 +123,10 @@ class ClientAccountController {
         dept_id,
       );
 
-      res.status(200).json({
+      res.status(200).json({ data: {
         message: "Department assigned successfully and message created",
         updated: result.updatedGroup,
-      });
+      } });
     } catch (err) {
       console.error("Set department error:", err);
 
@@ -167,10 +167,10 @@ class ClientAccountController {
         prof_date_of_birth,
       });
 
-      res.status(200).json({
+      res.status(200).json({ data: {
         message: "Profile updated successfully",
         profile,
-      });
+      } });
     } catch (err) {
       console.error("Update profile error:", err);
 
@@ -178,7 +178,7 @@ class ClientAccountController {
         return res.status(400).json({ error: err.message });
       }
 
-      res.status(500).json({ message: err.message || "Internal server error" });
+      res.status(500).json({ error: err.message || "Internal server error" });
     }
   }
 
@@ -196,7 +196,7 @@ class ClientAccountController {
         deptId,
       );
 
-      res.json({ success: true, message: messageData });
+      res.json({ data: { success: true, message: messageData } });
     } catch (err) {
       console.error("❌ Error sending client message:", err);
 

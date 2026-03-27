@@ -4,6 +4,8 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const http = require('http');
 require('dotenv').config();
+const { validateEnv } = require('./config/env.validation');
+validateEnv();
 
 const { initializeSocket } = require('./socket-simple');
 const { setupRoutes } = require('./routes');
@@ -26,6 +28,15 @@ app.use(cors(getCorsConfig()));
 // Routes
 // ===========================
 setupRoutes(app);
+
+// Global error handler — catches unhandled errors from routes/middleware
+app.use((err, req, res, next) => {
+  console.error('❌ Unhandled error:', err.message);
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
+  });
+});
 
 // Health check endpoint for Docker
 app.get('/health', (req, res) => {
