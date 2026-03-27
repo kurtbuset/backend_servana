@@ -112,7 +112,7 @@ class AgentStatusService {
    * @param {number} agentId - Agent user ID
    */
   notifyAssignedChats(io, assignedChats, agentId) {
-    // This method is deprecated - notification is now handled in socket-simple/agent-status.js
+    // This method is deprecated - notification is now handled in socket/agent-status.js
     // Keeping for backward compatibility but does nothing
     console.log(
       `⚠️ notifyAssignedChats called but is deprecated - handled in socket layer`,

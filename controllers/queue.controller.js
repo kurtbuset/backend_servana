@@ -95,7 +95,7 @@ class QueueController {
           // 1. Send new_assignment to the agent who accepted (so it appears in their list as active)
           const {
             handleChatAssignment,
-          } = require("../socket-simple/customer-list");
+          } = require("../socket/customer-list");
           await handleChatAssignment(io, chatGroupId, userId);
 
           // 2. Emit remove_chat_group to all OTHER agents in the department

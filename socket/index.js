@@ -8,7 +8,6 @@ const {
 } = require("./connection");
 const {
   handleCustomerListUpdate,
-  handleChatResolved,
 } = require("./customer-list");
 const {
   handleAgentOnline,
@@ -296,58 +295,6 @@ function initializeSocket(server, allowedOrigins) {
       } catch (error) {
         console.error("❌ Error sending message:", error);
         socket.emit("messageError", { message: "Failed to send message" });
-      }
-    });
-
-    // End chat (resolve)
-    socket.on("resolveChat", async ({ chatGroupId }) => {
-      try {
-        if (!chatGroupId) {
-          socket.emit("error", { message: "Chat group ID is required" });
-          return;
-        }
-
-        // Only agents can resolve chats for now (can be extended later)
-        if (socket.user.userType !== "agent") {
-          socket.emit("error", { message: "Only agents can resolve chats" });
-          return;
-        }
-
-        // Resolve the chat group
-        await chatService.resolveChatGroup(chatGroupId, socket.user.userId);
-
-        // Create system message
-        const systemMessage = await chatService.insertMessage({
-          chat_body: `Chat ended by ${socket.user.userType}`,
-          chat_group_id: chatGroupId,
-          chat_created_at: new Date().toISOString(),
-          sys_user_id: null, // System message
-          client_id: null, // System message
-        });
-
-        // Broadcast to all users in the chat room
-        const eventData = {
-          chat_group_id: chatGroupId,
-          status: "resolved",
-          resolved_at: new Date().toISOString(),
-          resolved_by_type: socket.user.userType,
-          resolved_by_id: socket.user.userId,
-          system_message: systemMessage,
-        };
-
-        io.to(`chat_${chatGroupId}`).emit("chatResolved", eventData);
-
-        // Handle customer list update (remove from active chats)
-        handleChatResolved(io, chatGroupId, null); // TODO: Get department ID
-
-        console.log(
-          `✅ Chat ${chatGroupId} resolved by ${socket.user.userType} ${socket.user.userId}`,
-        );
-      } catch (error) {
-        console.error("❌ Error resolving chat:", error);
-        socket.emit("error", {
-          message: "Failed to resolve chat: " + error.message,
-        });
       }
     });
 

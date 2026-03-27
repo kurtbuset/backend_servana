@@ -257,7 +257,7 @@ class ProfileController {
       // Broadcast via socket if available
       const io = req.app.get('io');
       if (io) {
-        const { broadcastStatusChangeToDepartments } = require("../socket-simple/agent-status");
+        const { broadcastStatusChangeToDepartments } = require("../socket/agent-status");
         await broadcastStatusChangeToDepartments(io, sysUserId, agent_status, "agent", new Date());
         console.log(`📡 Broadcasted agent status change via REST API: ${agent_status}`);
       }

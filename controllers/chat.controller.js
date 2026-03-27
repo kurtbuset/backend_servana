@@ -181,7 +181,7 @@ class ChatController {
       // Emit socket event for real-time updates
       const io = req.app.get('io');
       if (io) {
-        const { handleChatTransfer } = require('../socket-simple/customer-list');
+        const { handleChatTransfer } = require('../socket/customer-list');
         await handleChatTransfer(io, chatGroupId, userId, deptId, result.assignmentResult);
 
         // Get transfer details from service (department names, agent name)
@@ -245,6 +245,34 @@ class ChatController {
       }
 
       const resolvedChat = await chatService.resolveChatGroup(chatGroupId, userId, feedbackData);
+
+      // Emit socket notification for chat resolution
+      const io = req.app.get('io');
+      if (io) {
+        // Create system message for the chat resolution
+        const systemMessage = {
+          chat_id: `system_${Date.now()}`,
+          chat_body: "Chat ended by agent",
+          chat_group_id: chatGroupId,
+          chat_created_at: resolvedChat.resolved_at,
+          sys_user_id: null,
+          client_id: null,
+          sender_type: "system"
+        };
+
+        // Broadcast to all users in the chat room
+        const eventData = {
+          chat_group_id: chatGroupId,
+          status: "resolved",
+          resolved_at: resolvedChat.resolved_at,
+          resolved_by_type: "agent",
+          resolved_by_id: userId,
+          system_message: systemMessage,
+        };
+
+        io.to(`chat_${chatGroupId}`).emit("chat:resolved", eventData);
+        // console.log(`💻 Chat ${chatGroupId} resolved by agent ${userId}`);
+      }
 
       res.json({ data: {
         success: true,

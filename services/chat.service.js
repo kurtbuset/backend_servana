@@ -181,7 +181,6 @@ class ChatService {
       if (!directError && directChatGroup) {
         // messageId is a chat_group_id - use it directly
         chatGroupId = directChatGroup.chat_group_id;
-        console.log(`✅ Using specific chat group ID: ${chatGroupId}`);
       } else {
         // messageId is a client_id - find the most recent active chat group
         const { data: activeGroup, error: groupError } = await supabase

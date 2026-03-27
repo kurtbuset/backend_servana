@@ -5,7 +5,7 @@
 
 const express = require('express');
 const http = require('http');
-const { initializeSocket } = require('./socket-simple');
+const { initializeSocket } = require('./socket');
 
 const app = express();
 const server = http.createServer(app);

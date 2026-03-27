@@ -173,21 +173,13 @@ class MobileMessageController {
         feedbackData.messageCount = parseInt(feedbackData.messageCount) || 0;
       }
 
-      console.log('📊 Processing feedback data:', {
-        chatGroupId,
-        clientId,
-        rating: feedbackData.rating,
-        feedback: feedbackData.feedback ? 'provided' : 'none',
-        duration: feedbackData.chatDurationSeconds,
-        messageCount: feedbackData.messageCount
-      });
-
       const result = await mobileMessageService.endChatGroup(chatGroupId, clientId, feedbackData);
 
       // Emit socket notification for chat end
       const io = req.app.get('io');
       if (io) {
         // Create system message for the chat end
+        // console.log('socket trigger end chat message controller')
         const systemMessage = {
           chat_id: `system_${Date.now()}`,
           chat_body: "Chat ended by customer",
@@ -208,7 +200,7 @@ class MobileMessageController {
           system_message: systemMessage,
         };
 
-        io.to(`chat_${chatGroupId}`).emit("chatResolved", eventData);
+        io.to(`chat_${chatGroupId}`).emit("chat:resolved", eventData);
         console.log(`📱 Chat ${chatGroupId} ended by mobile client ${clientId}`);
       }
 

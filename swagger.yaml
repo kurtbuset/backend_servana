@@ -1,0 +1,1716 @@
+openapi: 3.0.3
+info:
+  title: Servana Backend API
+  description: |
+    API documentation for Servana - A customer service and chat management platform.
+    
+    ## Authentication
+    Most endpoints require JWT authentication via Bearer token in the Authorization header.
+    Mobile endpoints use a separate authentication flow with OTP verification.
+    
+    ## Base URL
+    - Development: `http://localhost:5000`
+    - Production: Configure based on deployment
+  version: 1.0.0
+  contact:
+    name: Servana API Support
+    url: https://github.com/kurtbuset/backend_servana
+
+servers:
+  - url: http://localhost:5000
+    description: Development server
+  - url: http://192.168.137.77:5000
+    description: Local network (Wi-Fi)
+
+tags:
+  - name: Authentication
+    description: User authentication and session management
+  - name: Profile
+    description: User profile management
+  - name: Mobile - OTP
+    description: Mobile OTP authentication
+  - name: Mobile - Client Account
+    description: Mobile client account management
+  - name: Mobile - Messages
+    description: Mobile messaging endpoints
+  - name: Mobile - Departments
+    description: Mobile department endpoints
+  - name: Departments
+    description: Department management
+  - name: Chat
+    description: Chat and messaging operations
+  - name: Admin
+    description: Admin operations
+  - name: Agents
+    description: Agent management
+  - name: Roles
+    description: Role and permission management
+  - name: Auto Replies
+    description: Automated reply management
+  - name: Macros
+    description: Macro management
+  - name: Queue
+    description: Queue management
+  - name: Health
+    description: System health checks
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token for web application authentication
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Error message"
+    
+    Success:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            message:
+              type: string
+    
+    User:
+      type: object
+      properties:
+        sys_user_id:
+          type: integer
+        sys_user_email:
+          type: string
+          format: email
+        role_id:
+          type: integer
+        role_name:
+          type: string
+    
+    Profile:
+      type: object
+      properties:
+        prof_id:
+          type: integer
+        prof_firstname:
+          type: string
+        prof_middlename:
+          type: string
+        prof_lastname:
+          type: string
+        prof_address:
+          type: string
+        prof_date_of_birth:
+          type: string
+          format: date
+        prof_created_at:
+          type: string
+          format: date-time
+    
+    Department:
+      type: object
+      properties:
+        dept_id:
+          type: integer
+        dept_name:
+          type: string
+        dept_is_active:
+          type: boolean
+        dept_created_at:
+          type: string
+          format: date-time
+        dept_created_by:
+          type: integer
+
+    
+    Client:
+      type: object
+      properties:
+        client_id:
+          type: integer
+        client_number:
+          type: string
+        client_country_code:
+          type: string
+        client_is_active:
+          type: boolean
+        prof_id:
+          type: integer
+        client_created_at:
+          type: string
+          format: date-time
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check endpoint
+      description: Check if the server is running
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: OK
+                  timestamp:
+                    type: string
+                    format: date-time
+                  service:
+                    type: string
+                    example: servana-backend
+
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate user with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                      user:
+                        $ref: '#/components/schemas/User'
+                      token:
+                        type: string
+        '400':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Refresh access token
+      description: Get a new access token using refresh token
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      token:
+                        type: string
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+
+  /auth/check:
+    get:
+      tags:
+        - Authentication
+      summary: Check authentication status
+      description: Verify if the current token is valid
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      authenticated:
+                        type: boolean
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: User logout
+      description: Logout user and invalidate session
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+
+  /profile:
+    get:
+      tags:
+        - Profile
+      summary: Get current user profile
+      description: Retrieve the authenticated user's profile information
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      sys_user_id:
+                        type: integer
+                      sys_user_email:
+                        type: string
+                      role_id:
+                        type: integer
+                      role_name:
+                        type: string
+                      privilege:
+                        type: object
+                      departments:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Department'
+                      profile:
+                        $ref: '#/components/schemas/Profile'
+                      image:
+                        type: object
+
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    
+    put:
+      tags:
+        - Profile
+      summary: Update current user profile
+      description: Update the authenticated user's profile information
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                firstName:
+                  type: string
+                middleName:
+                  type: string
+                lastName:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                address:
+                  type: string
+                dateOfBirth:
+                  type: string
+                  format: date
+      responses:
+        '200':
+          description: Profile updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /profile/image:
+    post:
+      tags:
+        - Profile
+      summary: Upload profile image
+      description: Upload a profile picture for the authenticated user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - image
+              properties:
+                image:
+                  type: string
+                  format: binary
+
+      responses:
+        '200':
+          description: Image uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                      img_location:
+                        type: string
+                      image:
+                        type: object
+        '400':
+          description: No image uploaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /profile/agent-status:
+    get:
+      tags:
+        - Profile
+      summary: Get agent status
+      description: Get the current agent's online/offline status
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Agent status retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      agent_status:
+                        type: string
+                        enum: [online, offline, away]
+    
+    put:
+      tags:
+        - Profile
+      summary: Update agent status
+      description: Update the agent's online/offline status
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - agent_status
+              properties:
+                agent_status:
+                  type: string
+                  enum: [online, offline, away]
+      responses:
+        '200':
+          description: Status updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                      agent_status:
+                        type: string
+
+
+  /otp/request-otp:
+    post:
+      tags:
+        - Mobile - OTP
+      summary: Request OTP
+      description: Request an OTP for login or registration (unified endpoint)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - phone_country_code
+                - phone_number
+              properties:
+                phone_country_code:
+                  type: string
+                  example: "+63"
+                phone_number:
+                  type: string
+                  example: "9123456789"
+      responses:
+        '200':
+          description: OTP sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                      is_new_user:
+                        type: boolean
+                      otp_expires_in:
+                        type: integer
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Too many requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /otp/verify-otp:
+    post:
+      tags:
+        - Mobile - OTP
+      summary: Verify OTP
+      description: Verify OTP and authenticate user (login or registration)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - phone_country_code
+                - phone_number
+                - otp
+              properties:
+                phone_country_code:
+                  type: string
+                  example: "+63"
+                phone_number:
+                  type: string
+                  example: "9123456789"
+                otp:
+                  type: string
+                  example: "123456"
+
+      responses:
+        '200':
+          description: OTP verified successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                      is_new_user:
+                        type: boolean
+                      requires_profile:
+                        type: boolean
+                      token:
+                        type: string
+                      client:
+                        $ref: '#/components/schemas/Client'
+        '400':
+          description: Invalid OTP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: OTP not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /clientAccount/auth/validate:
+    get:
+      tags:
+        - Mobile - Client Account
+      summary: Validate token
+      description: Validate the current JWT token
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Token is valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                      client:
+                        $ref: '#/components/schemas/Client'
+        '403':
+          description: Account is inactive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Client not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /clientAccount/profile/complete:
+    post:
+      tags:
+        - Mobile - Client Account
+      summary: Complete profile
+      description: Complete or update client profile with first and last name
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - firstname
+                - lastname
+              properties:
+                firstname:
+                  type: string
+                lastname:
+                  type: string
+
+      responses:
+        '200':
+          description: Profile completed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                      profile:
+                        $ref: '#/components/schemas/Profile'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /clientAccount/{prof_id}:
+    put:
+      tags:
+        - Mobile - Client Account
+      summary: Update profile
+      description: Update client profile information
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: prof_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prof_firstname:
+                  type: string
+                prof_middlename:
+                  type: string
+                prof_lastname:
+                  type: string
+                prof_address:
+                  type: string
+                prof_street_address:
+                  type: string
+                prof_region_info:
+                  type: string
+                prof_postal_code:
+                  type: string
+                prof_date_of_birth:
+                  type: string
+                  format: date
+      responses:
+        '200':
+          description: Profile updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                      profile:
+                        $ref: '#/components/schemas/Profile'
+
+  /clientAccount/{prof_id}/picture:
+    post:
+      tags:
+        - Mobile - Client Account
+      summary: Upload profile picture
+      description: Upload a profile picture for the client
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: prof_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - picture
+              properties:
+                picture:
+                  type: string
+                  format: binary
+
+      responses:
+        '200':
+          description: Picture uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                      picture_url:
+                        type: string
+        '400':
+          description: No file uploaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    
+    delete:
+      tags:
+        - Mobile - Client Account
+      summary: Delete profile picture
+      description: Delete the client's profile picture
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: prof_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Picture deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+
+  /clientAccount/chat_group/{id}/set-department:
+    patch:
+      tags:
+        - Mobile - Client Account
+      summary: Set chat group department
+      description: Assign a department to a chat group
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - dept_id
+              properties:
+                dept_id:
+                  type: integer
+      responses:
+        '200':
+          description: Department assigned successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                      updated:
+                        type: object
+
+  /clientAccount/client:
+    post:
+      tags:
+        - Mobile - Client Account
+      summary: Send client message
+      description: Send a message from the client
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+                - clientId
+              properties:
+                message:
+                  type: string
+                clientId:
+                  type: integer
+                deptId:
+                  type: integer
+
+      responses:
+        '200':
+          description: Message sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      success:
+                        type: boolean
+                      message:
+                        type: object
+
+  /departments:
+    get:
+      tags:
+        - Departments
+      summary: Get all departments
+      description: Retrieve all departments (requires VIEW_DEPT permission)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Departments retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Department'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    
+    post:
+      tags:
+        - Departments
+      summary: Create department
+      description: Create a new department (requires ADD_DEPT permission)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - dept_name
+                - dept_created_by
+              properties:
+                dept_name:
+                  type: string
+                dept_created_by:
+                  type: integer
+      responses:
+        '201':
+          description: Department created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Department'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /departments/{id}:
+    put:
+      tags:
+        - Departments
+      summary: Update department
+      description: Update an existing department (requires EDIT_DEPT permission)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - dept_name
+                - dept_updated_by
+              properties:
+                dept_name:
+                  type: string
+                dept_updated_by:
+                  type: integer
+
+      responses:
+        '200':
+          description: Department updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Department'
+
+  /departments/{id}/toggle:
+    put:
+      tags:
+        - Departments
+      summary: Toggle department status
+      description: Toggle department active/inactive status (requires EDIT_DEPT permission)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - dept_is_active
+                - dept_updated_by
+              properties:
+                dept_is_active:
+                  type: boolean
+                dept_updated_by:
+                  type: integer
+      responses:
+        '200':
+          description: Department status toggled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Department'
+
+  /departments/{id}/members:
+    get:
+      tags:
+        - Departments
+      summary: Get department members
+      description: Get all members of a department (public endpoint)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Members retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      members:
+                        type: array
+                        items:
+                          type: object
+
+  /departments/{id}/view-members:
+    get:
+      tags:
+        - Departments
+      summary: View department members
+      description: View department members (for department panel)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Members retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      members:
+                        type: array
+                        items:
+                          type: object
+
+  /chat/canned-messages:
+    get:
+      tags:
+        - Chat
+      summary: Get canned messages
+      description: Retrieve all canned messages for quick replies
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Canned messages retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+
+
+  /chat/groups:
+    get:
+      tags:
+        - Chat
+      summary: Get chat groups
+      description: Retrieve active chat groups for the authenticated agent
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Chat groups retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+
+  /chat/groups/resolved:
+    get:
+      tags:
+        - Chat
+      summary: Get resolved chat groups
+      description: Retrieve resolved/closed chat groups
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Resolved chat groups retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+
+  /chat/groups/{id}/transfer:
+    post:
+      tags:
+        - Chat
+      summary: Transfer chat group
+      description: Transfer a chat group to another agent or department
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                target_agent_id:
+                  type: integer
+                target_dept_id:
+                  type: integer
+                transfer_type:
+                  type: string
+                  enum: [agent, department]
+      responses:
+        '200':
+          description: Chat group transferred successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+
+  /chat/groups/{id}/resolve:
+    post:
+      tags:
+        - Chat
+      summary: Resolve chat group
+      description: Mark a chat group as resolved/closed
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Chat group resolved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+
+  /chat/messages/{chat_group_id}:
+    get:
+      tags:
+        - Chat
+      summary: Get chat messages
+      description: Retrieve all messages for a specific chat group
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: chat_group_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Messages retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+
+
+  /chat/room/{room_id}/stats:
+    get:
+      tags:
+        - Chat
+      summary: Get room statistics
+      description: Get statistics for a specific chat room
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: room_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Room stats retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+
+  /admins:
+    get:
+      tags:
+        - Admin
+      summary: Get all admins
+      description: Retrieve all admin users
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Admins retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+    
+    post:
+      tags:
+        - Admin
+      summary: Create admin
+      description: Create a new admin user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+                - role_id
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                role_id:
+                  type: integer
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+      responses:
+        '201':
+          description: Admin created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+
+  /manage-agents:
+    get:
+      tags:
+        - Agents
+      summary: Get all agents
+      description: Retrieve all agent users
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Agents retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+
+  /roles:
+    get:
+      tags:
+        - Roles
+      summary: Get all roles
+      description: Retrieve all roles with their permissions
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Roles retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+    
+    post:
+      tags:
+        - Roles
+      summary: Create role
+      description: Create a new role with permissions
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - role_name
+              properties:
+                role_name:
+                  type: string
+                permissions:
+                  type: object
+      responses:
+        '201':
+          description: Role created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+
+
+  /auto-replies:
+    get:
+      tags:
+        - Auto Replies
+      summary: Get all auto replies
+      description: Retrieve all automated reply templates
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Auto replies retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+    
+    post:
+      tags:
+        - Auto Replies
+      summary: Create auto reply
+      description: Create a new automated reply template
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - trigger
+                - response
+              properties:
+                trigger:
+                  type: string
+                response:
+                  type: string
+                is_active:
+                  type: boolean
+      responses:
+        '201':
+          description: Auto reply created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+
+  /auto-replies/{id}:
+    put:
+      tags:
+        - Auto Replies
+      summary: Update auto reply
+      description: Update an existing auto reply template
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                trigger:
+                  type: string
+                response:
+                  type: string
+                is_active:
+                  type: boolean
+      responses:
+        '200':
+          description: Auto reply updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+    
+    delete:
+      tags:
+        - Auto Replies
+      summary: Delete auto reply
+      description: Delete an auto reply template
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Auto reply deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+
+  /macros:
+    get:
+      tags:
+        - Macros
+      summary: Get all macros
+      description: Retrieve all macro templates
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Macros retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+    
+    post:
+      tags:
+        - Macros
+      summary: Create macro
+      description: Create a new macro template
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - content
+              properties:
+                name:
+                  type: string
+                content:
+                  type: string
+      responses:
+        '201':
+          description: Macro created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+
+
+  /macros/{id}:
+    put:
+      tags:
+        - Macros
+      summary: Update macro
+      description: Update an existing macro template
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                content:
+                  type: string
+      responses:
+        '200':
+          description: Macro updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+    
+    delete:
+      tags:
+        - Macros
+      summary: Delete macro
+      description: Delete a macro template
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Macro deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+
+  /queues:
+    get:
+      tags:
+        - Queue
+      summary: Get queue status
+      description: Retrieve current queue status and waiting customers
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Queue status retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      waiting:
+                        type: integer
+                      active:
+                        type: integer
+                      customers:
+                        type: array
+                        items:
+                          type: object
+
+  /change-role:
+    post:
+      tags:
+        - Roles
+      summary: Change user role
+      description: Change the role of a user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+                - role_id
+              properties:
+                user_id:
+                  type: integer
+                role_id:
+                  type: integer
+      responses:
+        '200':
+          description: Role changed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+
+  /messages:
+    get:
+      tags:
+        - Mobile - Messages
+      summary: Get mobile messages
+      description: Retrieve messages for mobile client
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Messages retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+
+  /department:
+    get:
+      tags:
+        - Mobile - Departments
+      summary: Get mobile departments
+      description: Retrieve departments for mobile client
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Departments retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Department'

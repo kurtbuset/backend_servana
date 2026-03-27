@@ -7,7 +7,7 @@ require('dotenv').config();
 const { validateEnv } = require('./config/env.validation');
 validateEnv();
 
-const { initializeSocket } = require('./socket-simple');
+const { initializeSocket } = require('./socket');
 const { setupRoutes } = require('./routes');
 const { getCorsConfig } = require('./config/cors.config');
 const { cacheManager } = require('./helpers/redisClient');
