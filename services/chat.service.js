@@ -2,6 +2,7 @@ const supabase = require("../helpers/supabaseClient");
 const cacheService = require("./cache.service");
 const cookie = require("cookie");
 const agentAssignmentService = require("./agentAssignment.service");
+const responseTimeService = require("./responseTime.service");
 const { determineSenderType, getSenderName, getSenderImageOptimized } = require("../utils/messageHelpers");
 
 class ChatService {
@@ -381,17 +382,34 @@ class ChatService {
    */
   async insertMessage(messageData) {
     try {
+      // Calculate response time if this is an agent message
+      const messageWithResponseTime = await responseTimeService.calculateResponseTime(messageData);
+      
       const { data, error: insertError } = await supabase
         .from("chat")
-        .insert([messageData])
+        .insert([messageWithResponseTime])
         .select("*");
 
       if (insertError) throw insertError;
       
       const newMessage = data && data.length > 0 ? data[0] : null;
       
-      // Invalidate chat message cache for this group
       if (newMessage && newMessage.chat_group_id) {
+        // Update chat group analytics if this is an agent message
+        if (newMessage.sys_user_id && newMessage.response_time_seconds !== null) {
+          await responseTimeService.updateChatGroupAnalytics(
+            newMessage.chat_group_id, 
+            newMessage.response_time_seconds
+          );
+          
+          // Set first response time if this is the first agent message
+          await responseTimeService.setFirstResponse(
+            newMessage.chat_group_id,
+            newMessage.chat_created_at
+          );
+        }
+        
+        // Invalidate chat message cache for this group
         await cacheService.invalidateChatMessages(newMessage.chat_group_id);
         
         // Also invalidate user's chat groups cache if they're assigned

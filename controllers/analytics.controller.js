@@ -419,14 +419,19 @@ class AnalyticsController {
    */
   async recalculateResponseTimes(req, res) {
     try {
-      const { data, error } = await require('../helpers/supabaseClient').supabase
-        .rpc('recalculate_all_response_times');
-
-      if (error) throw error;
+      console.log('🔄 Starting response time recalculation via API...');
+      
+      const responseTimeService = require('../services/responseTime.service');
+      const result = await responseTimeService.recalculateAllResponseTimes();
 
       res.json({
         success: true,
-        message: data || 'Response times recalculated successfully',
+        message: 'Response times recalculated successfully using backend logic',
+        data: {
+          processed: result.processed,
+          updated: result.updated,
+          skipped: result.processed - result.updated
+        },
         timestamp: new Date().toISOString()
       });
     } catch (error) {
