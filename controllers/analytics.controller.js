@@ -27,16 +27,34 @@ class AnalyticsController {
     // Dashboard stats without auth for testing
     router.get('/dashboard-stats-test', (req, res) => this.getDashboardStats(req, res));
 
+    // Temporary test endpoint to verify frontend can reach backend
+    router.get('/connection-test', (req, res) => {
+      res.json({
+        success: true,
+        message: 'Frontend-Backend connection is working!',
+        timestamp: new Date().toISOString(),
+        serverPort: process.env.PORT || 5000,
+        requestHeaders: {
+          origin: req.headers.origin,
+          host: req.headers.host,
+          userAgent: req.headers['user-agent']
+        }
+      });
+    });
+
     // All routes require authentication
-    router.get('/messages', getCurrentUser, (req, res) => this.getMessageAnalytics(req, res));
-    router.get('/response-time', getCurrentUser, (req, res) => this.getResponseTimeAnalytics(req, res));
-    router.get('/enhanced-response-time', getCurrentUser, (req, res) => this.getEnhancedResponseTimeAnalytics(req, res));
-    router.get('/agent-performance', getCurrentUser, (req, res) => this.getAgentPerformanceAnalytics(req, res));
-    router.get('/customer-satisfaction', getCurrentUser, (req, res) => this.getCustomerSatisfactionAnalytics(req, res));
-    router.get('/top-conversations', getCurrentUser, (req, res) => this.getTopConversations(req, res));
-    router.get('/department-rankings', getCurrentUser, (req, res) => this.getDepartmentRankings(req, res));
-    router.get('/dashboard-stats', getCurrentUser, (req, res) => this.getDashboardStats(req, res));
-    router.post('/recalculate-response-times', getCurrentUser, (req, res) => this.recalculateResponseTimes(req, res));
+    const getCurrentUser = require('../middleware/getCurrentUser');
+    router.use(getCurrentUser);
+    
+    router.get('/messages', (req, res) => this.getMessageAnalytics(req, res));
+    router.get('/response-time', (req, res) => this.getResponseTimeAnalytics(req, res));
+    router.get('/enhanced-response-time', (req, res) => this.getEnhancedResponseTimeAnalytics(req, res));
+    router.get('/agent-performance', (req, res) => this.getAgentPerformanceAnalytics(req, res));
+    router.get('/customer-satisfaction', (req, res) => this.getCustomerSatisfactionAnalytics(req, res));
+    router.get('/top-conversations', (req, res) => this.getTopConversations(req, res));
+    router.get('/department-rankings', (req, res) => this.getDepartmentRankings(req, res));
+    router.get('/dashboard-stats', (req, res) => this.getDashboardStats(req, res));
+    router.post('/recalculate-response-times', (req, res) => this.recalculateResponseTimes(req, res));
 
     return router;
   }
@@ -299,6 +317,13 @@ class AnalyticsController {
 
       // Use current user's ID as agent ID
       const agentId = req.userId;
+      
+      if (!agentId) {
+        return res.status(401).json({
+          success: false,
+          message: 'User not authenticated'
+        });
+      }
 
       const data = await AnalyticsService.getTopConversations(agentId, period, limitNum);
       

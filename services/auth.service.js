@@ -13,13 +13,29 @@ class AuthService {
    * Sign in with Supabase Auth
    */
   async signInWithPassword(email, password) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) throw error;
-    return data;
+      if (error) {
+        console.error('❌ Supabase auth error:', error.message);
+        throw error;
+      }
+      
+      console.log('✅ Authentication successful for:', email);
+      return data;
+    } catch (error) {
+      console.error('❌ Authentication failed:', error.message);
+      
+      // Provide more specific error messages
+      if (error.message.includes('fetch failed') || error.message.includes('ECONNRESET')) {
+        throw new Error('Database connection failed. Please check if Supabase is running.');
+      }
+      
+      throw error;
+    }
   }
 
   /**

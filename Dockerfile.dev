@@ -1,3 +1,4 @@
+# Try using a mirror or alternative registry if Docker Hub is blocked
 FROM node:20-alpine
 
 WORKDIR /app
