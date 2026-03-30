@@ -63,7 +63,7 @@ class ChangeRoleController {
     try {
       const { id } = req.params;
       const { role_id, sys_user_is_active } = req.body;
-      const updatedBy = req.user?.sys_user_id || null;
+      const updatedBy = req.userId || null;
 
       const updatedUser = await changeRoleService.updateUserRole(
         id,

@@ -10,23 +10,6 @@ class AnalyticsController {
   getRouter() {
     const router = express.Router();
 
-    // Add logging middleware for debugging
-    router.use((req, res, next) => {
-      console.log(`📊 Analytics API: ${req.method} ${req.path}`, req.query);
-      next();
-    });
-
-    // Test route without authentication
-    router.get('/test', (req, res) => {
-      res.json({ 
-        message: 'Analytics controller is working!',
-        timestamp: new Date().toISOString()
-      });
-    });
-
-    // Dashboard stats without auth for testing
-    router.get('/dashboard-stats-test', (req, res) => this.getDashboardStats(req, res));
-
     // All routes require authentication
     router.get('/messages', getCurrentUser, (req, res) => this.getMessageAnalytics(req, res));
     router.get('/response-time', getCurrentUser, (req, res) => this.getResponseTimeAnalytics(req, res));
@@ -130,8 +113,7 @@ class AnalyticsController {
       const validPeriods = ['daily', 'weekly', 'monthly', 'yearly'];
       if (!validPeriods.includes(period)) {
         return res.status(400).json({
-          success: false,
-          message: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
+          error: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
         });
       }
 
@@ -148,20 +130,12 @@ class AnalyticsController {
       }
 
       const data = await AnalyticsService.getEnhancedResponseTimeAnalytics(period, dateParams);
-      
-      res.json({
-        success: true,
-        data,
-        meta: {
-          formula: 'ART = Total Response Time / Total Number of Responses',
-          description: 'Comprehensive response time analytics tracking all agent responses'
-        }
-      });
+
+      res.json({ data });
     } catch (error) {
       console.error('Error in getEnhancedResponseTimeAnalytics:', error);
       res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to fetch enhanced response time analytics'
+        error: error.message || 'Failed to fetch enhanced response time analytics'
       });
     }
   }
@@ -178,8 +152,7 @@ class AnalyticsController {
       const validPeriods = ['daily', 'weekly', 'monthly', 'yearly'];
       if (!validPeriods.includes(period)) {
         return res.status(400).json({
-          success: false,
-          message: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
+          error: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
         });
       }
 
@@ -196,25 +169,16 @@ class AnalyticsController {
       }
 
       const data = await AnalyticsService.getAgentPerformanceAnalytics(
-        sysUserId ? parseInt(sysUserId) : null, 
+        sysUserId ? parseInt(sysUserId) : null,
         period,
         dateParams
       );
-      
-      res.json({
-        success: true,
-        data,
-        meta: {
-          period,
-          sysUserId: sysUserId || 'all',
-          totalAgents: data.length
-        }
-      });
+
+      res.json({ data });
     } catch (error) {
       console.error('Error in getAgentPerformanceAnalytics:', error);
       res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to fetch agent performance analytics'
+        error: error.message || 'Failed to fetch agent performance analytics'
       });
     }
   }
@@ -231,8 +195,7 @@ class AnalyticsController {
       const validPeriods = ['daily', 'weekly', 'monthly', 'yearly'];
       if (!validPeriods.includes(period)) {
         return res.status(400).json({
-          success: false,
-          message: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
+          error: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
         });
       }
 
@@ -252,21 +215,12 @@ class AnalyticsController {
       }
 
       const data = await AnalyticsService.getCustomerSatisfactionAnalytics(period, agentId, dateParams);
-      
-      res.json({
-        success: true,
-        data,
-        meta: {
-          period,
-          agentId,
-          description: 'Customer satisfaction ratings based on chat feedback'
-        }
-      });
+
+      res.json({ data });
     } catch (error) {
       console.error('Error in getCustomerSatisfactionAnalytics:', error);
       res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to fetch customer satisfaction analytics'
+        error: error.message || 'Failed to fetch customer satisfaction analytics'
       });
     }
   }
@@ -283,8 +237,7 @@ class AnalyticsController {
       const validPeriods = ['daily', 'weekly', 'monthly', 'yearly'];
       if (!validPeriods.includes(period)) {
         return res.status(400).json({
-          success: false,
-          message: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
+          error: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
         });
       }
 
@@ -292,8 +245,7 @@ class AnalyticsController {
       const limitNum = parseInt(limit);
       if (isNaN(limitNum) || limitNum < 1 || limitNum > 20) {
         return res.status(400).json({
-          success: false,
-          message: 'Limit must be a number between 1 and 20'
+          error: 'Limit must be a number between 1 and 20'
         });
       }
 
@@ -301,22 +253,12 @@ class AnalyticsController {
       const agentId = req.userId;
 
       const data = await AnalyticsService.getTopConversations(agentId, period, limitNum);
-      
-      res.json({
-        success: true,
-        data,
-        meta: {
-          period,
-          agentId,
-          limit: limitNum,
-          description: 'Top conversations showing most frequent clients for this agent'
-        }
-      });
+
+      res.json({ data });
     } catch (error) {
       console.error('Error in getTopConversations:', error);
       res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to fetch top conversations'
+        error: error.message || 'Failed to fetch top conversations'
       });
     }
   }
@@ -332,16 +274,14 @@ class AnalyticsController {
       // Validate department ID
       if (!departmentId) {
         return res.status(400).json({
-          success: false,
-          message: 'Department ID is required'
+          error: 'Department ID is required'
         });
       }
 
       const deptId = parseInt(departmentId);
       if (isNaN(deptId)) {
         return res.status(400).json({
-          success: false,
-          message: 'Department ID must be a valid number'
+          error: 'Department ID must be a valid number'
         });
       }
 
@@ -349,8 +289,7 @@ class AnalyticsController {
       const validPeriods = ['daily', 'weekly', 'monthly', 'yearly'];
       if (!validPeriods.includes(period)) {
         return res.status(400).json({
-          success: false,
-          message: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
+          error: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
         });
       }
 
@@ -358,28 +297,17 @@ class AnalyticsController {
       const limitNum = parseInt(limit);
       if (isNaN(limitNum) || limitNum < 1 || limitNum > 20) {
         return res.status(400).json({
-          success: false,
-          message: 'Limit must be a number between 1 and 20'
+          error: 'Limit must be a number between 1 and 20'
         });
       }
 
       const data = await AnalyticsService.getDepartmentRankings(deptId, period, limitNum);
-      
-      res.json({
-        success: true,
-        data,
-        meta: {
-          departmentId: deptId,
-          period,
-          limit: limitNum,
-          description: 'Agent rankings within department based on customer satisfaction ratings'
-        }
-      });
+
+      res.json({ data });
     } catch (error) {
       console.error('Error in getDepartmentRankings:', error);
       res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to fetch department rankings'
+        error: error.message || 'Failed to fetch department rankings'
       });
     }
   }
@@ -424,16 +352,11 @@ class AnalyticsController {
 
       if (error) throw error;
 
-      res.json({
-        success: true,
-        message: data || 'Response times recalculated successfully',
-        timestamp: new Date().toISOString()
-      });
+      res.json({ data: { message: data || 'Response times recalculated successfully' } });
     } catch (error) {
       console.error('Error in recalculateResponseTimes:', error);
       res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to recalculate response times'
+        error: error.message || 'Failed to recalculate response times'
       });
     }
   }

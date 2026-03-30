@@ -2,6 +2,7 @@ const express = require("express");
 const rateLimit = require("express-rate-limit");
 const otpService = require("../../services/mobile/otp.service");
 const clientAccountService = require("../../services/mobile/clientAccount.service");
+const smsService = require("../../services/sms.service");
 
 const otpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -24,7 +25,7 @@ class OtpController {
       console.error("Unhandled error:", err);
       res
         .status(500)
-        .json({ error: "Internal server error", details: String(err) });
+        .json({ error: "Internal server error" });
     });
 
     return router;
@@ -56,18 +57,25 @@ class OtpController {
         clientId,
       );
 
-      // Log OTP for development (remove in production)
-      console.log(
-        `🔐 OTP for ${phone_country_code}${phone_number}: ${result.otp}`,
-      );
+      // Send OTP via SMS
+      // if (process.env.SMS_TO_API_KEY) {
+      //   try {
+      //     await smsService.sendOtpSms(phone_country_code, phone_number, result.otp);
+      //   } catch (smsError) {
+      //     console.error('Failed to send SMS:', smsError.message);
+          
+      //     // If it's a balance issue, log OTP to console for development
+      //     if (smsError.message?.includes('SMS_BALANCE_REQUIRED')) {
+      //       console.log(`⚠️  SMS.to requires account top-up. Development OTP for ${phone_country_code}${phone_number}: ${result.otp}`);
+      //     }
+      //     // Continue even if SMS fails - OTP is still stored
+      //   }
+      // } else {
+      //   // Development mode - log OTP to console
+      //   console.log(`🔐 OTP for ${phone_country_code}${phone_number}: ${result.otp}`);
+      // }
 
-      // TODO: Send SMS in production
-      // await smsGateway.send(
-      //   phone_country_code + phone_number,
-      //   `Your verification code is: ${result.otp}`
-      // );
-
-      res.json({ data: {
+      res.json({ data: {  
         message: "OTP sent successfully",
         is_new_user: result.isNewUser,
         otp_expires_in: result.expiresIn,

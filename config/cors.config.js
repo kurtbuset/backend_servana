@@ -20,23 +20,18 @@ const getCorsConfig = () => ({
       return callback(null, true);
     }
     
-    // Allow any origin starting with http://172.20.176 (your network)
-    if (origin.startsWith('http://172.20.176')) {
-      return callback(null, true);
-    }
-    
-    // Allow any origin starting with http://192.168 (common home networks)
-    if (origin.startsWith('http://192.168')) {
-      return callback(null, true);
-    }
-    
-    // Allow any origin starting with http://10. (corporate networks)
-    if (origin.startsWith('http://10.')) {
-      return callback(null, true);
-    }
-    
-    // In development, allow all origins
-    if (process.env.NODE_ENV === 'development') {
+    // In development, allow local network origins
+    if (process.env.NODE_ENV !== 'production') {
+      if (origin.startsWith('http://172.20.176')) {
+        return callback(null, true);
+      }
+      if (origin.startsWith('http://192.168')) {
+        return callback(null, true);
+      }
+      if (origin.startsWith('http://10.')) {
+        return callback(null, true);
+      }
+      // Allow all origins in development
       return callback(null, true);
     }
     

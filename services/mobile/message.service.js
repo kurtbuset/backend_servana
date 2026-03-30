@@ -413,13 +413,7 @@ class MobileMessageService {
           chat_group_id,
           resolved_at,
           created_at,
-          department:department(dept_name),
-          chat_feedback:feedback_id(
-            rating,
-            feedback_text,
-            chat_duration_seconds,
-            message_count
-          )
+          department:department(dept_name)
         `)
         .eq("client_id", clientId)
         .eq("status", "resolved")

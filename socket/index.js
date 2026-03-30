@@ -29,6 +29,58 @@ const SocketManager = require("./manager");
  * Main socket server with event handlers
  */
 
+// Per-user rate limiting for socket events (in-memory)
+const socketRateLimits = new Map(); // userId -> { messages: [], lastTyping: 0 }
+
+function checkMessageRateLimit(userId) {
+  const now = Date.now();
+  const windowMs = 60 * 1000; // 1 minute window
+  const maxMessages = 30;
+
+  if (!socketRateLimits.has(userId)) {
+    socketRateLimits.set(userId, { messages: [], lastTyping: 0 });
+  }
+
+  const userLimits = socketRateLimits.get(userId);
+  // Remove timestamps older than the window
+  userLimits.messages = userLimits.messages.filter(ts => now - ts < windowMs);
+
+  if (userLimits.messages.length >= maxMessages) {
+    return false; // Rate limit exceeded
+  }
+
+  userLimits.messages.push(now);
+  return true;
+}
+
+function checkTypingRateLimit(userId) {
+  const now = Date.now();
+  const minIntervalMs = 1000; // max 1 typing event per second
+
+  if (!socketRateLimits.has(userId)) {
+    socketRateLimits.set(userId, { messages: [], lastTyping: 0 });
+  }
+
+  const userLimits = socketRateLimits.get(userId);
+  if (now - userLimits.lastTyping < minIntervalMs) {
+    return false; // Rate limit exceeded
+  }
+
+  userLimits.lastTyping = now;
+  return true;
+}
+
+// Clean up stale entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  for (const [userId, limits] of socketRateLimits.entries()) {
+    limits.messages = limits.messages.filter(ts => now - ts < windowMs);
+    const isStale = limits.messages.length === 0 && (now - limits.lastTyping > 5 * 60 * 1000);
+    if (isStale) socketRateLimits.delete(userId);
+  }
+}, 5 * 60 * 1000);
+
 function initializeSocket(server, allowedOrigins) {
   const io = new Server(server, {
     cors: {
@@ -192,6 +244,11 @@ function initializeSocket(server, allowedOrigins) {
 
     // Send message
     socket.on("sendMessage", async (data) => {
+      const userId = socket.user?.userId;
+      if (userId && !checkMessageRateLimit(userId)) {
+        socket.emit('error', { message: 'Message rate limit exceeded. Max 30 messages per minute.' });
+        return;
+      }
       try {
         const { chat_group_id, chat_body } = data;
 
@@ -300,6 +357,10 @@ function initializeSocket(server, allowedOrigins) {
 
     // Typing indicators
     socket.on("typing", ({ chatGroupId, userName }) => {
+      const userId = socket.user?.userId;
+      if (userId && !checkTypingRateLimit(userId)) {
+        return; // Silently drop excessive typing events
+      }
       if (chatGroupId) {
         socket.to(`chat_${chatGroupId}`).emit("typing", {
           chatGroupId,

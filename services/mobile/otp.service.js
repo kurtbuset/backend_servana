@@ -194,6 +194,8 @@ class OtpService {
     const otpHash = await this.hashOtp(otp);
     const expiresAt = this.getOtpExpiryTimestamp();
 
+    console.log('otp: ', otp)
+
     // 4. Store OTP
     await this.upsertOtp(
       phoneCountryCode,

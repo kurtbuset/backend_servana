@@ -34,13 +34,15 @@ class DepartmentController {
       (req, res) => this.toggleDepartmentStatus(req, res)
     );
 
-    // Get members of a department - public api endpoint
-    router.get("/:id/members", 
+    // Get members of a department - requires view department permission
+    router.get("/:id/members",
+      checkPermission(PERMISSIONS.VIEW_DEPT),
       (req, res) => this.getDepartmentMembers(req, res)
     );
 
-    // View department members - any authenticated user can view (for department panel)
-    router.get("/:id/view-members", 
+    // View department members - requires view department permission
+    router.get("/:id/view-members",
+      checkPermission(PERMISSIONS.VIEW_DEPT),
       (req, res) => this.viewDepartmentMembers(req, res)
     );
 

@@ -134,7 +134,25 @@ class ProfileService {
    * Upload profile image to storage
    */
   async uploadImageToStorage(profId, file) {
-    const ext = file.originalname.split(".").pop() || "png";
+    // Validate file type
+    const ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+    const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
+
+    const ext = (file.originalname.split('.').pop() || '').toLowerCase();
+
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      throw new Error(`Invalid file type. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`);
+    }
+
+    if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      throw new Error(`Invalid MIME type. Allowed: ${ALLOWED_MIME_TYPES.join(', ')}`);
+    }
+
+    if (file.size > MAX_SIZE_BYTES) {
+      throw new Error('File too large. Maximum size is 5MB');
+    }
+
     const fileName = `${uuidv4()}.${ext}`;
     const filePath = `profile/${profId}/${fileName}`;
 

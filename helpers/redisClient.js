@@ -65,9 +65,40 @@ class RedisCacheManager {
       // console.log('   Password:', password ? '***' : 'none', process.env.REDIS_PASSWORD ? '(from env)' : '(default)');
 
       this.client = redis.createClient({
-        host: host,
-        port: port,
-        password: password,
+        socket: {
+          host: host,
+          port: parseInt(port),
+          reconnectStrategy: (retries) => {
+            if (retries > 10) {
+              console.error('❌ Redis: max reconnection attempts reached');
+              return new Error('Max reconnection attempts reached');
+            }
+            const delay = Math.min(retries * 100, 3000);
+            console.log(`🔄 Redis reconnecting in ${delay}ms (attempt ${retries})`);
+            return delay;
+          },
+        },
+        ...(password && { password }),
+      });
+
+      this.client.on('error', (err) => {
+        console.error('❌ Redis client error:', err.message);
+        this.isConnected = false;
+      });
+
+      this.client.on('end', () => {
+        console.warn('⚠️  Redis connection closed');
+        this.isConnected = false;
+      });
+
+      this.client.on('reconnecting', () => {
+        console.log('🔄 Redis reconnecting...');
+        this.isConnected = false;
+      });
+
+      this.client.on('ready', () => {
+        console.log('✅ Redis ready');
+        this.isConnected = true;
       });
 
       await this.client.connect();
@@ -435,7 +466,11 @@ class RedisCacheManager {
 
   // Rate limiting
   async checkRateLimit(identifier, limit, windowSeconds) {
-    if (!this.isConnected) return true; // Allow if cache unavailable
+    if (!this.isConnected) {
+      // Fail closed: deny when Redis is unavailable to prevent rate limit bypass
+      console.warn('⚠️  Rate limit check skipped — Redis unavailable, denying request');
+      return false;
+    }
     
     try {
       const key = this.generateKey('RATE_LIMIT', identifier);

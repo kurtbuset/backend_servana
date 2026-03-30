@@ -44,14 +44,14 @@ class ChatController {
       (req, res) => this.resolveChatGroup(req, res)
     );
 
+    // Get room statistics (for monitoring) - protected by getCurrentUser middleware above
+    router.get("/admin/room-stats", (req, res) => this.getRoomStats(req, res));
+
     // Get chat messages for a specific client - requires message viewing permission
-    router.get("/:clientId", 
+    router.get("/:clientId",
       checkPermission(PERMISSIONS.VIEW_MESSAGE),
       (req, res) => this.getChatMessages(req, res)
     );
-    
-    // Get room statistics (for monitoring) - no specific permission needed for now
-    router.get("/admin/room-stats", (req, res) => this.getRoomStats(req, res));
 
     return router;
   }

@@ -39,7 +39,6 @@ class SocketManager {
     // Log connection stats every 5 minutes
     this.statsInterval = setInterval(() => {
       const stats = this.getConnectionStats();
-      console.log('📊 Connection Stats:', stats);
     }, 5 * 60 * 1000); // 5 minutes
   }
 
