@@ -22,7 +22,7 @@ class ChangeRoleController {
       (req, res) => this.getAllRoles(req, res)
     );
 
-    // Update a user's role or active status - requires edit change roles permission
+    // Update a user's role or active status - requires edait chnge roles permission
     router.put("/:id", 
       checkPermission(PERMISSIONS.EDIT_CHANGE_ROLES),
       (req, res) => this.updateUserRole(req, res)

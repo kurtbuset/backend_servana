@@ -174,39 +174,28 @@ class CacheService {
   }
 
   /**
-   * ONLINE USER MANAGEMENT (In-Memory Only)
+   * USER PRESENCE MANAGEMENT (Redis-backed with TTL)
+   * Handles 3-state agent status: accepting_chats, not_accepting_chats, offline
    */
-  
-  async setUserOnline(userId, userData) {
-    return await this.cache.setUserOnline(userId, userData);
+
+  async setUserPresence(userId, userPresenceData) {
+    return await this.cache.setUserPresence(userId, userPresenceData);
   }
 
-  async setUserOffline(userId) {
-    return await this.cache.setUserOffline(userId);
+  async getUserPresence(userId) {
+    return await this.cache.getUserPresence(userId);
   }
 
-  async getOnlineUsers() {
-    return await this.cache.getOnlineUsers();
+  async getAllUserPresence() {
+    return await this.cache.getAllUserPresence();
   }
 
-  async getUserStatus(userId) {
-    return await this.cache.get('USER_STATUS', userId);
+  async removeUserPresence(userId) {
+    return await this.cache.removeUserPresence(userId);
   }
 
-  /**
-   * TYPING INDICATORS (Short-lived)
-   */
-  
-  async setTyping(chatGroupId, userId, isTyping = true) {
-    if (isTyping) {
-      return await this.cache.set('TYPING', chatGroupId, { userId, timestamp: Date.now() }, 10);
-    } else {
-      return await this.cache.delete('TYPING', chatGroupId);
-    }
-  }
-
-  async getTyping(chatGroupId) {
-    return await this.cache.get('TYPING', chatGroupId);
+  async updateUserHeartbeat(userId) {
+    return await this.cache.updateUserHeartbeat(userId);
   }
 
   /**

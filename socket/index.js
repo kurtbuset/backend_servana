@@ -7,22 +7,15 @@ const {
   getConnectionStats,
 } = require("./connection");
 const {
-  handleCustomerListUpdate,
-} = require("./customer-list");
-const {
-  handleAgentOnline,
-  handleAgentHeartbeat,
-  handleUpdateAgentStatus,
-  handleGetAgentStatuses,
-  handleAgentExplicitOffline,
-} = require("./agent-status");
-const {
-  joinDepartmentRooms,
   canJoinRoom,
   handleUserJoined,
   handleUserLeft,
 } = require("./room-management");
 const SocketManager = require("./manager");
+const {
+  getChatGroupInfo,
+  getClientInfo,
+} = require("./customer-list");
 
 /**
  * Simplified Socket.IO Implementation
@@ -157,12 +150,6 @@ function initializeSocket(server, allowedOrigins) {
     // Handle connection lifecycle
     handleConnection(socket, io);
 
-    // Handle agent coming online and join department rooms
-    if (socket.user.userType === "agent") {
-      handleAgentOnline(socket, io);
-      joinDepartmentRooms(socket);
-    }
-
     // Join chat room
     socket.on("chat:join", async ({ chatGroupId }) => {
       try {
@@ -204,24 +191,6 @@ function initializeSocket(server, allowedOrigins) {
 
         socket.join(`chat_${chatGroupId}`);
         socket.currentChatGroup = chatGroupId;
-
-        // Log room join with detailed info
-        // const roomName = `chat_${chatGroupId}`;
-        // const roomSize = io.sockets.adapter.rooms.get(roomName)?.size || 0;
-        // console.log(`🏠 ${socket.user.userType} ${socket.user.userId} joined room: ${roomName} (${roomSize} users total)`);
-        
-        // // Log all current rooms for this socket
-        // const userRooms = Array.from(socket.rooms).filter(room => room !== socket.id);
-        // console.log(`📍 Socket ${socket.id} is now in rooms: [${userRooms.join(', ')}]`);
-        
-        // // Log room members if room size is small (for debugging)
-        // if (roomSize <= 5) {
-        //   const roomSockets = io.sockets.adapter.rooms.get(roomName);
-        //   if (roomSockets) {
-        //     const memberIds = Array.from(roomSockets);
-        //     console.log(`👥 Room ${roomName} members: [${memberIds.join(', ')}]`);
-        //   }
-        // }
 
         // Notify room that user joined and auto-mark messages as read
         await handleUserJoined(
@@ -347,8 +316,36 @@ function initializeSocket(server, allowedOrigins) {
           timestamp: message.chat_created_at,
         });
 
-        // Handle customer list update (moves client to top of agent's list)
-        await handleCustomerListUpdate(io, message, socket.user.userType);
+        // Emit customerListUpdate to move chat to top of list
+        const chatGroupInfo = await getChatGroupInfo(chat_group_id);
+        if (chatGroupInfo && chatGroupInfo.sys_user_id) {
+          const clientInfo = await getClientInfo(chatGroupInfo.client_id);
+          if (clientInfo) {
+            const moveToTopPayload = {
+              type: 'move_to_top',
+              data: {
+                customer: {
+                  chat_group_id: chatGroupInfo.chat_group_id,
+                  name: clientInfo.name,
+                  number: clientInfo.client_number,
+                  profile: clientInfo.profile_image,
+                  status: chatGroupInfo.status,
+                  department: chatGroupInfo.department?.dept_name || "Unknown",
+                  sys_user_id: chatGroupInfo.sys_user_id,
+                  dept_id: chatGroupInfo.dept_id,
+                },
+              },
+              timestamp: new Date().toISOString(),
+            };
+
+            // Emit only to the assigned agent
+            const agentRoom = `agent_${chatGroupInfo.sys_user_id}`;
+            io.to(agentRoom).emit('customerListUpdate', moveToTopPayload);
+
+            console.log(`📋 customerListUpdate: move_to_top for chat ${chat_group_id} to agent ${chatGroupInfo.sys_user_id}`);
+          }
+        }
+
       } catch (error) {
         console.error("❌ Error sending message:", error);
         socket.emit("messageError", { message: "Failed to send message" });
@@ -379,27 +376,6 @@ function initializeSocket(server, allowedOrigins) {
           userType: socket.user.userType,
         });
       }
-    });
-
-    // Agent status events
-    socket.on("agentOnline", async () => {
-      await handleAgentOnline(socket, io);
-    });
-
-    socket.on("agentHeartbeat", async () => {
-      await handleAgentHeartbeat(socket);
-    });
-
-    socket.on("updateAgentStatus", async (data) => {
-      await handleUpdateAgentStatus(socket, io, data);
-    });
-
-    socket.on("getAgentStatuses", async () => {
-      await handleGetAgentStatuses(socket);
-    });
-
-    socket.on("agentOffline", async () => {
-      await handleAgentExplicitOffline(socket, io);
     });
   });
 

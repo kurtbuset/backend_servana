@@ -3,13 +3,16 @@
  * Handles periodic tasks and cleanup for socket operations
  */
 
-const { checkIdleAgents, cleanupRateLimits } = require('./agent-status');
+const { cacheManager } = require('../helpers/redisClient');
+const { USER_PRESENCE_STATUS } = require('../constants/statuses');
+const { setPresenceAndBroadcast } = require('./connection');
 
 class SocketManager {
   constructor(io) {
     this.io = io;
     this.idleCheckInterval = null;
     this.cleanupInterval = null;
+    this.presenceCleanupInterval = null;
   }
 
   /**
@@ -17,29 +20,51 @@ class SocketManager {
    */
   start() {
     console.log('🚀 Starting Socket Manager');
+    
+    // Start presence cleanup task (runs every 5 minutes)
+    this.startPresenceCleanup();
+  }
 
-    // Check for idle agents every minute
-    this.idleCheckInterval = setInterval(async () => {
+  /**
+   * Clean up stale presence entries
+   * Marks users as offline if they haven't sent a heartbeat in 15+ minutes
+   */
+  startPresenceCleanup() {
+    this.presenceCleanupInterval = setInterval(async () => {
       try {
-        await checkIdleAgents(this.io);
+        const allPresences = await cacheManager.getAllUserPresence();
+        const now = new Date();
+        const staleThreshold = 15 * 60 * 1000; // 15 minutes
+        
+        let cleanedCount = 0;
+        
+        for (const [userId, presence] of Object.entries(allPresences)) {
+          const lastSeen = new Date(presence.lastSeen);
+          const timeSinceLastSeen = now - lastSeen;
+          
+          // If user hasn't been seen in 15+ minutes and not already offline
+          if (timeSinceLastSeen > staleThreshold && presence.userPresence !== USER_PRESENCE_STATUS.OFFLINE) {
+            console.log(`🧹 Cleaning stale presence: userId=${userId} (last seen ${Math.floor(timeSinceLastSeen / 1000 / 60)} minutes ago)`);
+            
+            await setPresenceAndBroadcast(this.io, userId, {
+              ...presence,
+              userPresence: USER_PRESENCE_STATUS.OFFLINE,
+              lastSeen: now.toISOString()
+            }, { reason: 'stale_cleanup' });
+            
+            cleanedCount++;
+          }
+        }
+        
+        if (cleanedCount > 0) {
+          console.log(`✅ Presence cleanup completed: ${cleanedCount} stale entries marked offline`);
+        }
       } catch (error) {
-        console.error('❌ Error checking idle agents:', error);
+        console.error('❌ Error in presence cleanup:', error);
       }
-    }, 60 * 1000); // 1 minute
-
-    // Cleanup rate limits every 5 minutes
-    this.cleanupInterval = setInterval(() => {
-      try {
-        cleanupRateLimits();
-      } catch (error) {
-        console.error('❌ Error cleaning up rate limits:', error);
-      }
-    }, 5 * 60 * 1000); // 5 minutes
-
-    // Log connection stats every 5 minutes
-    this.statsInterval = setInterval(() => {
-      const stats = this.getConnectionStats();
-    }, 5 * 60 * 1000); // 5 minutes
+    }, 5 * 60 * 1000); // Run every 5 minutes
+    
+    console.log('✅ Presence cleanup task started (runs every 5 minutes)');
   }
 
   /**
@@ -61,6 +86,11 @@ class SocketManager {
     if (this.statsInterval) {
       clearInterval(this.statsInterval);
       this.statsInterval = null;
+    }
+
+    if (this.presenceCleanupInterval) {
+      clearInterval(this.presenceCleanupInterval);
+      this.presenceCleanupInterval = null;
     }
   }
 
@@ -144,6 +174,56 @@ class SocketManager {
       }
     });
     console.log(`📡 Broadcasted ${event} to ${count} ${userType}s`);
+  }
+
+  /**
+   * Get all user presences from Redis
+   */
+  async getAllPresences() {
+    try {
+      return await cacheManager.getAllUserPresence();
+    } catch (error) {
+      console.error('❌ Error getting all presences:', error);
+      return {};
+    }
+  }
+
+  /**
+   * Get presence for specific user
+   */
+  async getUserPresence(userId) {
+    try {
+      return await cacheManager.getUserPresence(userId);
+    } catch (error) {
+      console.error('❌ Error getting user presence:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Force update user presence (admin function)
+   */
+  async forceUpdatePresence(userId, status) {
+    try {
+      const presence = await cacheManager.getUserPresence(userId);
+      
+      if (!presence) {
+        console.error(`❌ User ${userId} not found in presence cache`);
+        return false;
+      }
+
+      await setPresenceAndBroadcast(this.io, userId, {
+        ...presence,
+        userPresence: status,
+        lastSeen: new Date().toISOString()
+      }, { reason: 'admin_update' });
+
+      console.log(`✅ Force updated presence: userId=${userId} -> ${status}`);
+      return true;
+    } catch (error) {
+      console.error('❌ Error force updating presence:', error);
+      return false;
+    }
   }
 }
 

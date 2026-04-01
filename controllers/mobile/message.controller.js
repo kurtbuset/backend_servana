@@ -2,6 +2,7 @@ const express = require("express");
 const mobileMessageService = require("../../services/mobile/message.service");
 const getCurrentMobileUser = require("../../middleware/getCurrentMobileUser");
 const { parseDurationToSeconds } = require("../../utils/parseDuration");
+const { handleChatAssignment, handleChatQueued } = require("../../socket/customer-list");
 
 class MobileMessageController {
   getRouter() {
@@ -121,12 +122,14 @@ class MobileMessageController {
 
       const result = await mobileMessageService.createChatGroup(department, clientId);
 
-      // Emit socket notifications
+      console.log('result: ', result.assigned)
+      // Emit customerListUpdate to agents
       const io = req.app.get('io');
-      if (io && io.socketConfig) {
-        const notifier = io.socketConfig.getChatGroupNotifier();
-        if (notifier) {
-          notifier.notifyChatGroupCreated(result, result.department, clientId);
+      if (io) {
+        if (result.assigned) {
+          await handleChatAssignment(io, result.chat_group_id, result.agent_id);
+        } else {
+          await handleChatQueued(io, result.chat_group_id, department);
         }
       }
 

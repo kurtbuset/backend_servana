@@ -57,6 +57,8 @@ class ChatService {
       const cacheKey = `user_chat_groups_${userId}`;
       let groups = await cacheService.cache.get('CHAT_GROUP', cacheKey);
       
+      console.log('chat groups from cache: ', JSON.stringify(groups, null, 2))
+
       if (!groups) {
         // Cache miss - fetch from database
         const { data, error } = await supabase
@@ -574,9 +576,13 @@ class ChatService {
       await cacheService.invalidateChatGroup(chatGroupId);
       await cacheService.invalidateChatMessages(chatGroupId);
       
-      // Invalidate user's chat groups cache
+      // Invalidate user's active chat groups cache
       const userCacheKey = `user_chat_groups_${userId}`;
       await cacheService.cache.delete('CHAT_GROUP', userCacheKey);
+      
+      // Invalidate user's resolved chat groups cache
+      const resolvedCacheKey = `user_resolved_chat_groups_${userId}`;
+      await cacheService.cache.delete('CHAT_GROUP', resolvedCacheKey);
 
       return {
         ...chatGroup,

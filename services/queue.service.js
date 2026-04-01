@@ -1,5 +1,7 @@
 const supabase = require("../helpers/supabaseClient");
 const cacheService = require("./cache.service");
+const agentAssignmentService = require("./agentAssignment.service");
+const { CHAT_STATUS } = require("../constants/statuses");
 const { getProfileImages, getLatestMessageTimes, determineSenderType, getSenderName, getSenderImageOptimized } = require("../utils/messageHelpers");
 
 class QueueService {
@@ -95,64 +97,15 @@ class QueueService {
   }
 
   /**
-   * Assign chat group to user
-   */
-  async assignChatGroupToUser(chatGroupId, userId) {
-    const { error } = await supabase
-      .from("chat_group")
-      .update({ sys_user_id: userId })
-      .eq("chat_group_id", chatGroupId)
-      .is("sys_user_id", null); // avoid overwriting if already set
-
-    if (error) throw error;
-  }
-
-  /**
-   * Accept chat - assign to user and set status to active
+   * Accept chat from queue - delegates core assignment to agentAssignmentService
    */
   async acceptChat(chatGroupId, userId) {
     try {
-      const { data, error } = await supabase
-        .from("chat_group")
-        .update({ 
-          sys_user_id: userId,
-          status: "active"
-        })
-        .eq("chat_group_id", chatGroupId)
-        .eq("status", "queued") // Only queued chats
-        .is("sys_user_id", null)
-        .select()
-        .single();
+      const data = await agentAssignmentService.assignChatGroupToAgent(
+        chatGroupId, userId, { requiredStatus: CHAT_STATUS.QUEUED }
+      );
 
-      if (error) throw error;
-      
-      if (!data) {
-        throw new Error("Chat group not found or already assigned");
-      }
-
-      // Update the most recent transfer log for this chat group with to_agent_id
-      // This handles cases where chat was transferred but no agent was available (queued)
-      const { error: updateLogError } = await supabase
-        .from("chat_transfer_log")
-        .update({
-          to_agent_id: userId
-        })
-        .eq("chat_group_id", chatGroupId)
-        .is("to_agent_id", null) // Only update if to_agent_id is still null
-        .order("transferred_at", { ascending: false })
-        .limit(1);
-
-      if (updateLogError) {
-        console.error("⚠️ Failed to update transfer log with to_agent_id:", updateLogError.message);
-        // Don't throw - chat acceptance succeeded, log update is secondary
-      } else {
-        console.log(`✅ Updated transfer log for chat ${chatGroupId} with to_agent_id: ${userId}`);
-      }
-
-      // Invalidate related caches
-      await cacheService.invalidateChatGroup(chatGroupId);
-      
-      // Invalidate user's chat groups cache
+      // Also invalidate user's chat groups cache (specific to manual acceptance)
       const userCacheKey = `user_chat_groups_${userId}`;
       await cacheService.cache.delete('CHAT_GROUP', userCacheKey);
 

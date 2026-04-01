@@ -13,7 +13,7 @@ class DepartmentService {
       const cachedDepartments = await cacheService.getDepartments();
       
       if (cachedDepartments && cachedDepartments.length >= 0) {
-        console.log(`✅ Cache HIT: Retrieved ${cachedDepartments.length} departments from Redis cache`);
+        // console.log(`✅ Cache HIT: Retrieved ${cachedDepartments.length} departments from Redis cache`);
         // Filter for active departments only
         return cachedDepartments.filter(dept => dept.dept_is_active !== false);
       }
@@ -152,7 +152,7 @@ class DepartmentService {
       let cachedMembers = await cacheService.cache.get('DEPARTMENT', cacheKey);
       
       if (cachedMembers !== null && cachedMembers !== undefined) {
-        console.log(`✅ Cache HIT: Retrieved ${cachedMembers.length} department members from Redis cache for dept ${deptId}`);
+        // console.log(`✅ Cache HIT: Retrieved ${cachedMembers.length} department members from Redis cache for dept ${deptId}`);
         return cachedMembers;
       }
       
@@ -192,10 +192,10 @@ class DepartmentService {
       const validEntries = userDepartments.filter(ud => ud.sys_user);
       const userIds = validEntries.map(ud => ud.sys_user.sys_user_id);
 
-      // Batch 1: Get prof_id and last_seen for all users
+      // Batch 1: Get prof_id for all users
       const { data: usersWithProf } = await supabase
         .from("sys_user")
-        .select("sys_user_id, prof_id, last_seen")
+        .select("sys_user_id, prof_id")
         .in("sys_user_id", userIds);
 
       const userProfMap = {};
@@ -247,7 +247,6 @@ class DepartmentService {
           role: ud.sys_user.role,
           profile: (profId && profileMap[profId]) || null,
           image: (profId && imageMap[profId]) || null,
-          last_seen: userProf?.last_seen || null,
           departments: deptsByUser[userId] || [],
         };
       });

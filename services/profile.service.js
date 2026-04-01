@@ -1,7 +1,7 @@
 const supabase = require("../helpers/supabaseClient");
 const { v4: uuidv4 } = require("uuid");
 const cacheService = require("./cache.service");
-const { AGENT_STATUS, AGENT_STATUS_VALUES } = require("../constants/statuses");
+const { USER_STATUS, USER_STATUS_VALUES } = require("../constants/statuses");
 
 class ProfileService {
   /**
@@ -11,7 +11,7 @@ class ProfileService {
     // Fetch system_user with role_name from role table
     const { data: userRow, error: userErr } = await supabase
       .from("sys_user")
-      .select("sys_user_id, sys_user_email, prof_id, role_id, agent_status, role:role_id(role_name)")
+      .select("sys_user_id, sys_user_email, prof_id, role_id, role:role_id(role_name)")
       .eq("sys_user_id", sysUserId)
       .single();
 
@@ -217,6 +217,71 @@ class ProfileService {
   }
 
   /**
+   * Fetch user privileges by role_id
+   */
+  async fetchUserPrivileges(roleId) {
+    try {
+      // Fetch role with privilege data in a single query
+      const { data: roleData, error: roleError } = await supabase
+        .from("role")
+        .select(`
+          priv_id,
+          privilege:priv_id (
+            priv_id,
+            priv_can_view_message,
+            priv_can_message,
+            priv_can_manage_profile,
+            priv_can_use_canned_mess,
+            priv_can_end_chat,
+            priv_can_transfer,
+            priv_can_view_dept,
+            priv_can_add_dept,
+            priv_can_edit_dept,
+            priv_can_manage_dept,
+            priv_can_assign_dept,
+            priv_can_manage_role,
+            priv_can_assign_role,
+            priv_can_create_account,
+            priv_can_view_auto_reply,
+            priv_can_add_auto_reply,
+            priv_can_edit_auto_reply,
+            priv_can_delete_auto_reply,
+            priv_can_manage_auto_reply,
+            priv_can_view_macros,
+            priv_can_add_macros,
+            priv_can_edit_macros,
+            priv_can_delete_macros,
+            priv_can_view_change_roles,
+            priv_can_edit_change_roles,
+            priv_can_view_manage_agents,
+            priv_can_view_agents_info,
+            priv_can_create_agent_account,
+            priv_can_edit_manage_agents,
+            priv_can_edit_dept_manage_agents,
+            priv_can_view_analytics_manage_agents
+          )
+        `)
+        .eq("role_id", roleId)
+        .single();
+
+      if (roleError) {
+        console.error("❌ Failed to fetch role privileges:", roleError.message);
+        return null;
+      }
+
+      if (!roleData?.privilege) {
+        console.warn("⚠️ Role has no privilege assigned");
+        return null;
+      }
+
+      return roleData.privilege;
+    } catch (error) {
+      console.error("❌ Exception while fetching user privileges:", error.message);
+      return null;
+    }
+  }
+
+  /**
    * Fetch user departments from sys_user_department table
    */
   async fetchUserDepartments(sysUserId) {
@@ -260,6 +325,72 @@ class ProfileService {
       return [];
     }
   }
+
+  /**
+   * Fetch user privileges by role_id
+   */
+  async fetchUserPrivileges(roleId) {
+    try {
+      // Fetch role with privilege data in a single query
+      const { data: roleData, error: roleError } = await supabase
+        .from("role")
+        .select(`
+          priv_id,
+          privilege:priv_id (
+            priv_id,
+            priv_can_view_message,
+            priv_can_message,
+            priv_can_manage_profile,
+            priv_can_use_canned_mess,
+            priv_can_end_chat,
+            priv_can_transfer,
+            priv_can_view_dept,
+            priv_can_add_dept,
+            priv_can_edit_dept,
+            priv_can_manage_dept,
+            priv_can_assign_dept,
+            priv_can_manage_role,
+            priv_can_assign_role,
+            priv_can_create_account,
+            priv_can_view_auto_reply,
+            priv_can_add_auto_reply,
+            priv_can_edit_auto_reply,
+            priv_can_delete_auto_reply,
+            priv_can_manage_auto_reply,
+            priv_can_view_macros,
+            priv_can_add_macros,
+            priv_can_edit_macros,
+            priv_can_delete_macros,
+            priv_can_view_change_roles,
+            priv_can_edit_change_roles,
+            priv_can_view_manage_agents,
+            priv_can_view_agents_info,
+            priv_can_create_agent_account,
+            priv_can_edit_manage_agents,
+            priv_can_edit_dept_manage_agents,
+            priv_can_view_analytics_manage_agents
+          )
+        `)
+        .eq("role_id", roleId)
+        .single();
+
+      if (roleError) {
+        console.error("❌ Failed to fetch role privileges:", roleError.message);
+        return null;
+      }
+
+      if (!roleData?.privilege) {
+        console.warn("⚠️ Role has no privilege assigned");
+        return null;
+      }
+
+      return roleData.privilege;
+    } catch (error) {
+      console.error("❌ Exception while fetching user privileges:", error.message);
+      return null;
+    }
+  }
+
 
   /**
    * Check if user has a specific permission
@@ -509,50 +640,6 @@ class ProfileService {
       console.error('❌ Error in backfillMissingProfiles:', error.message);
       throw error;
     }
-  }
-
-  /**
-   * Get agent status
-   */
-  async getAgentStatus(sysUserId) {
-    try {
-      const { data: userRow, error: userErr } = await supabase
-        .from("sys_user")
-        .select("agent_status")
-        .eq("sys_user_id", sysUserId)
-        .single();
-
-      if (userErr || !userRow) {
-        throw new Error("User not found");
-      }
-
-      return userRow.agent_status || AGENT_STATUS.OFFLINE;
-    } catch (error) {
-      console.error(`❌ Error getting agent status for user ${sysUserId}:`, error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * Update agent status
-   */
-  async updateAgentStatus(sysUserId, status) {
-    const validStatuses = AGENT_STATUS_VALUES;
-    
-    if (!validStatuses.includes(status)) {
-      throw new Error(`Invalid agent status: ${status}`);
-    }
-
-    const { error } = await supabase
-      .from("sys_user")
-      .update({
-        agent_status: status,
-        sys_user_updated_at: new Date().toISOString()
-      })
-      .eq("sys_user_id", sysUserId);
-
-    if (error) throw error;
-    await cacheService.invalidateUserProfile(sysUserId);
   }
 }
 

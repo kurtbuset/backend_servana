@@ -1,15 +1,7 @@
 /**
- * Centralized status constants for agent and chat group statuses.
+ * Centralized user presence constants for agent and chat group statuses.
  * Use these instead of hardcoded strings throughout the codebase.
  */
-
-const AGENT_STATUS = {
-  ACCEPTING: 'accepting_chats',
-  NOT_ACCEPTING: 'not_accepting_chats',
-  OFFLINE: 'offline',
-};
-
-const AGENT_STATUS_VALUES = Object.values(AGENT_STATUS);
 
 const CHAT_STATUS = {
   ACTIVE: 'active',
@@ -18,4 +10,10 @@ const CHAT_STATUS = {
   PENDING: 'pending',
 };
 
-module.exports = { AGENT_STATUS, AGENT_STATUS_VALUES, CHAT_STATUS };
+const USER_PRESENCE_STATUS = {
+  ACCEPTING_CHATS: 'accepting_chats',
+  NOT_ACCEPTING_CHATS: 'not_accepting_chats',
+  OFFLINE: 'offline',
+};
+
+module.exports = { CHAT_STATUS, USER_PRESENCE_STATUS };

@@ -73,105 +73,33 @@ async function getClientInfo(clientId) {
 }
 
 /**
- * Handle customer list update when a message is sent
+ * Build customerListUpdate payload
  */
-async function handleCustomerListUpdate(io, savedMessage, senderType) {
-  try {
-    // Only update customer lists when clients send messages
-    // (agents sending messages don't change the customer order priority)
-    if (senderType !== "client") {
-      return;
-    }
-
-    // Get chat group and department information
-    const chatGroupInfo = await getChatGroupInfo(savedMessage.chat_group_id);
-    if (!chatGroupInfo) {
-      console.error(
-        "❌ Could not find chat group info for customer list update",
-      );
-      return;
-    }
-
-    // Get client information for the update
-    const clientInfo = await getClientInfo(chatGroupInfo.client_id);
-    if (!clientInfo) {
-      console.error("❌ Could not find client info for customer list update");
-      return;
-    }
-
-    // Prepare customer update data
-    const customerUpdate = {
-      chat_group_id: savedMessage.chat_group_id,
-      client_id: chatGroupInfo.client_id,
-      timestamp: savedMessage.chat_created_at,
-      department_id: chatGroupInfo.dept_id,
+function buildCustomerUpdate(type, chatGroupInfo, clientInfo, agentId) {
+  return {
+    type,
+    data: {
       customer: {
-        id: clientInfo.client_id,
-        chat_group_id: savedMessage.chat_group_id,
+        chat_group_id: chatGroupInfo.chat_group_id,
         name: clientInfo.name,
         number: clientInfo.client_number,
         profile: clientInfo.profile_image,
-        time: new Date(savedMessage.chat_created_at).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
         status: chatGroupInfo.status,
         department: chatGroupInfo.department?.dept_name || "Unknown",
+        sys_user_id: chatGroupInfo.sys_user_id,
+        dept_id: chatGroupInfo.dept_id,
       },
-    };
-
-    // Handle based on chat status and assignment
-    if (chatGroupInfo.status === "active" && chatGroupInfo.sys_user_id) {
-      // Chat is active and assigned to a specific agent
-      // Only send to that agent (move to top of their list)
-      io.to(`agent_${chatGroupInfo.sys_user_id}`).emit("customerListUpdate", {
-        type: "move_to_top",
-        data: customerUpdate,
-      });
-
-      console.log(
-        `📋 Sent move_to_top to agent ${chatGroupInfo.sys_user_id} for chat ${savedMessage.chat_group_id}`,
-      );
-    } else if (chatGroupInfo.status === "queued") {
-      // Chat is queued (no agent assigned yet)
-      // Broadcast to all agents in the department
-      broadcastCustomerListUpdate(io, chatGroupInfo.dept_id, {
-        type: "new_assignment",
-        data: customerUpdate,
-      });
-    }
-  } catch (error) {
-    console.error("❌ Error handling customer list update:", error);
-  }
-}
-
-/**
- * Broadcast customer list update to department agents
- */
-function broadcastCustomerListUpdate(io, departmentId, updateData) {
-  const roomName = `department_${departmentId}`;
-  io.to(roomName).emit("customerListUpdate", updateData);
-  console.log(
-    `📋 Broadcast customer list update to department ${departmentId}:`,
-    updateData.type,
-  );
-}
-
-/**
- * Handle chat resolution customer list update
- */
-function handleChatResolved(io, chatGroupId, departmentId) {
-  broadcastCustomerListUpdate(io, departmentId, {
-    type: "chat_resolved",
-    data: {
-      chat_group_id: chatGroupId,
-      department_id: departmentId,
+      agentId: agentId || null,
+      chat_group_id: chatGroupInfo.chat_group_id,
+      accepted_by: agentId || null,
     },
-  });
+    timestamp: new Date().toISOString(),
+  };
 }
 
 /**
- * Handle new chat assignment
+ * Handle new chat assignment (auto-assigned via round-robin)
+ * Emits customerListUpdate with type 'assigned' only to agents in the same department
  */
 async function handleChatAssignment(io, chatGroupId, agentId) {
   try {
@@ -181,39 +109,25 @@ async function handleChatAssignment(io, chatGroupId, agentId) {
     const clientInfo = await getClientInfo(chatGroupInfo.client_id);
     if (!clientInfo) return;
 
-    const customerUpdate = {
-      chat_group_id: chatGroupId,
-      client_id: chatGroupInfo.client_id,
-      department_id: chatGroupInfo.dept_id,
-      customer: {
-        id: clientInfo.client_id,
-        chat_group_id: chatGroupId,
-        name: clientInfo.name,
-        number: clientInfo.client_number,
-        profile: clientInfo.profile_image,
-        status: "active",
-        department: chatGroupInfo.department?.dept_name || "Unknown",
-      },
-    };
+    const payload = buildCustomerUpdate('assigned', chatGroupInfo, clientInfo, agentId);
+    console.log('payload: ', JSON.stringify(payload, null, 2))
+    // Emit only to agents in the same department
+    const departmentRoom = `department_${chatGroupInfo.dept_id}`;
+    io.to(departmentRoom).emit('customerListUpdate', payload);
 
-    // Emit to the specific agent
-    io.to(`agent_${agentId}`).emit("customerListUpdate", {
-      type: "new_assignment",
-      data: customerUpdate,
-    });
 
-    console.log(
-      `📋 Sent new assignment to agent ${agentId} for chat ${chatGroupId}`,
-    );
+    console.log(`📋 customerListUpdate: assigned chat ${chatGroupId} to agent ${agentId} in dept ${chatGroupInfo.dept_id} (room: ${departmentRoom})`);
   } catch (error) {
     console.error("❌ Error handling chat assignment update:", error);
   }
 }
 
 /**
- * Handle chat transfer between departments
+ * Handle chat queued (no available agents)
+ * Emits customerListUpdate with type 'new_queued_chat' only to agents in the same department
+ * Includes not_accepting_chats agents so they can manually accept from web
  */
-async function handleChatTransfer(io, chatGroupId, fromAgentId, toDeptId, assignmentResult) {
+async function handleChatQueued(io, chatGroupId, deptId) {
   try {
     const chatGroupInfo = await getChatGroupInfo(chatGroupId);
     if (!chatGroupInfo) return;
@@ -221,58 +135,43 @@ async function handleChatTransfer(io, chatGroupId, fromAgentId, toDeptId, assign
     const clientInfo = await getClientInfo(chatGroupInfo.client_id);
     if (!clientInfo) return;
 
-    const customerUpdate = {
-      chat_group_id: chatGroupId,
-      client_id: chatGroupInfo.client_id,
-      department_id: toDeptId,
-      customer: {
-        id: clientInfo.client_id,
-        chat_group_id: chatGroupId,
-        name: clientInfo.name,
-        number: clientInfo.client_number,
-        profile: clientInfo.profile_image,
-        status: assignmentResult.assigned ? "active" : "queued",
-        department: chatGroupInfo.department?.dept_name || "Unknown",
-      },
-    };
+    const payload = buildCustomerUpdate('new_queued_chat', chatGroupInfo, clientInfo, null);
+    
+    // Emit only to agents in the same department
+    const departmentRoom = `department_${deptId}`;
+    io.to(departmentRoom).emit('customerListUpdate', payload);
 
-    // Remove from old agent's list
-    if (fromAgentId) {
-      io.to(`agent_${fromAgentId}`).emit("customerListUpdate", {
-        type: "chat_transferred_out",
-        data: {
-          chat_group_id: chatGroupId,
-        },
-      });
-      console.log(`📋 Removed chat ${chatGroupId} from agent ${fromAgentId}'s list`);
-    }
-
-    // If assigned to new agent, add to their list
-    if (assignmentResult.assigned && assignmentResult.agentId) {
-      io.to(`agent_${assignmentResult.agentId}`).emit("customerListUpdate", {
-        type: "new_assignment",
-        data: customerUpdate,
-      });
-      console.log(`📋 Added chat ${chatGroupId} to agent ${assignmentResult.agentId}'s list`);
-    } else {
-      // If queued, broadcast to all agents in the new department
-      broadcastCustomerListUpdate(io, toDeptId, {
-        type: "new_assignment",
-        data: customerUpdate,
-      });
-      console.log(`📋 Broadcast queued chat ${chatGroupId} to department ${toDeptId}`);
-    }
+    console.log(`📋 customerListUpdate: new_queued_chat ${chatGroupId} in dept ${deptId} (room: ${departmentRoom})`);
   } catch (error) {
-    console.error("❌ Error handling chat transfer update:", error);
+    console.error("❌ Error handling chat queued update:", error);
+  }
+}
+
+/**
+ * Handle chat manually accepted from queue
+ * Emits customerListUpdate with type 'chat_accepted' so other agents remove it from their list
+ */
+async function handleChatAccepted(io, chatGroupId, agentId) {
+  try {
+    const chatGroupInfo = await getChatGroupInfo(chatGroupId);
+    if (!chatGroupInfo) return;
+
+    const clientInfo = await getClientInfo(chatGroupInfo.client_id);
+    if (!clientInfo) return;
+
+    const payload = buildCustomerUpdate('chat_accepted', chatGroupInfo, clientInfo, agentId);
+    io.emit('customerListUpdate', payload);
+
+    console.log(`📋 customerListUpdate: chat_accepted ${chatGroupId} by agent ${agentId}`);
+  } catch (error) {
+    console.error("❌ Error handling chat accepted update:", error);
   }
 }
 
 module.exports = {
-  handleCustomerListUpdate,
-  broadcastCustomerListUpdate,
-  handleChatResolved,
   handleChatAssignment,
-  handleChatTransfer,
+  handleChatQueued,
+  handleChatAccepted,
   getChatGroupInfo,
   getClientInfo,
 };

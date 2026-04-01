@@ -7,6 +7,7 @@ const { formatChatGroups } = require("../utils/formatChatGroups");
 const { getProfileImages, getLatestMessageTimes } = require("../utils/messageHelpers");
 const { CHAT_STATUS } = require("../constants/statuses");
 const { parseDurationToSeconds } = require("../utils/parseDuration");
+const { getChatGroupInfo, getClientInfo } = require("../socket/customer-list");
 
 class ChatController {
   getRouter() {
@@ -181,9 +182,6 @@ class ChatController {
       // Emit socket event for real-time updates
       const io = req.app.get('io');
       if (io) {
-        const { handleChatTransfer } = require('../socket/customer-list');
-        await handleChatTransfer(io, chatGroupId, userId, deptId, result.assignmentResult);
-
         // Get transfer details from service (department names, agent name)
         const details = await chatService.getTransferDetails(
           result.from_dept_id, deptId, result.assignmentResult
@@ -199,6 +197,36 @@ class ChatController {
           assigned: result.assignmentResult.assigned,
           timestamp: new Date().toISOString()
         });
+
+        // Emit customerListUpdate to move chat to top of list for assigned agent
+        const chatGroupInfo = await getChatGroupInfo(chatGroupId);
+        if (chatGroupInfo && chatGroupInfo.sys_user_id) {
+          const clientInfo = await getClientInfo(chatGroupInfo.client_id);
+          if (clientInfo) {
+            const moveToTopPayload = {
+              type: 'move_to_top',
+              data: {
+                customer: {
+                  chat_group_id: chatGroupInfo.chat_group_id,
+                  name: clientInfo.name,
+                  number: clientInfo.client_number,
+                  profile: clientInfo.profile_image,
+                  status: chatGroupInfo.status,
+                  department: chatGroupInfo.department?.dept_name || "Unknown",
+                  sys_user_id: chatGroupInfo.sys_user_id,
+                  dept_id: chatGroupInfo.dept_id,
+                },
+              },
+              timestamp: new Date().toISOString(),
+            };
+
+            // Emit only to the assigned agent
+            const agentRoom = `agent_${chatGroupInfo.sys_user_id}`;
+            io.to(agentRoom).emit('customerListUpdate', moveToTopPayload);
+
+            console.log(`📋 customerListUpdate: move_to_top for transferred chat ${chatGroupId} to agent ${chatGroupInfo.sys_user_id}`);
+          }
+        }
       }
 
       res.json({ data: {

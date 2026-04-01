@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const supabase = require("../../helpers/supabaseClient");
 const { v4: uuidv4 } = require("uuid");
 const bcrypt = require("bcrypt");
@@ -14,7 +15,7 @@ class OtpService {
    */
   generateOtp(length = OTP_LENGTH) {
     let otp = "";
-    for (let i = 0; i < length; i++) otp += Math.floor(Math.random() * 10);
+    for (let i = 0; i < length; i++) otp += crypto.randomInt(0, 10);
     return otp;
   }
 
@@ -195,7 +196,6 @@ class OtpService {
     const expiresAt = this.getOtpExpiryTimestamp();
 
     console.log('otp: ', otp)
-
     // 4. Store OTP
     await this.upsertOtp(
       phoneCountryCode,
@@ -206,9 +206,8 @@ class OtpService {
       clientId,
     );
 
-    // 5. Return OTP and metadata (OTP should be sent via SMS in production)
+    // 5. Return metadata (OTP is delivered via SMS only — never returned to caller)
     return {
-      otp, // For development only - remove in production
       isNewUser,
       expiresIn: OTP_EXPIRY_MINUTES * 60,
     };

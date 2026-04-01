@@ -266,7 +266,6 @@ class MobileMessageService {
         {
           dept_id: department,
           client_id: clientId,
-          status: "queued", // Initially queued
         },
       ])
       .select()
@@ -282,8 +281,6 @@ class MobileMessageService {
         chatGroupId,
         department
       );
-
-      console.log(`📋 Chat group ${chatGroupId} assignment result:`, assignmentResult);
 
       return {
         chat_group_id: chatGroupId,

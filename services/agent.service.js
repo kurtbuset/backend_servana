@@ -21,7 +21,7 @@ class AgentService {
       const cachedAgents = await cacheService.getAgents();
       
       if (cachedAgents !== null && cachedAgents !== undefined) {
-        console.log(`✅ Cache HIT: Retrieved ${cachedAgents.length} agents from Redis cache`);
+        // console.log(`✅ Cache HIT: Retrieved ${cachedAgents.length} agents from Redis cache`);
         return cachedAgents;
       }
       
@@ -164,7 +164,7 @@ class AgentService {
           .map(dept => dept.dept_name)
           .sort();
         
-        console.log(`✅ Cache HIT: Retrieved ${activeDepartmentNames.length} active departments from cache`);
+        // console.log(`✅ Cache HIT: Retrieved ${activeDepartmentNames.length} active departments from cache`);
         return activeDepartmentNames;
       }
       

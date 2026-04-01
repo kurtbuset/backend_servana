@@ -1,5 +1,4 @@
 const supabase = require("../helpers/supabaseClient");
-const { AGENT_STATUS_VALUES } = require("../constants/statuses");
 
 class AuthService {
   /**
@@ -89,26 +88,6 @@ class AuthService {
       throw new Error("No session data returned");
     }
 
-    return data;
-  }
-
-  /**
-   * Update agent status
-   */
-  async updateAgentStatus(userId, status) {
-    const validStatuses = AGENT_STATUS_VALUES;
-    
-    if (!validStatuses.includes(status)) {
-      throw new Error(`Invalid agent status: ${status}`);
-    }
-
-    const { data, error } = await supabase
-      .from("sys_user")
-      .update({ agent_status: status })
-      .eq("sys_user_id", userId)
-      .select();
-
-    if (error) throw error;
     return data;
   }
 }

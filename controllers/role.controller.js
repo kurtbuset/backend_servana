@@ -29,12 +29,6 @@ class RoleController {
       (req, res) => this.updateRole(req, res)
     );
 
-    // Get members for a specific role - requires role management permission
-    router.get("/:roleId/members", 
-      checkPermission(PERMISSIONS.MANAGE_ROLE),
-      (req, res) => this.getRoleMembers(req, res)
-    );
-
     // Update member permissions - requires role management permission
     router.put("/:roleId/members/:userId/permissions", 
       checkPermission(PERMISSIONS.MANAGE_ROLE),
@@ -111,29 +105,6 @@ class RoleController {
     }
   }
 
-  /**
-   * Get all members for a specific role
-   */
-  async getRoleMembers(req, res) {
-    try {
-      const roleId = parseInt(req.params.roleId);
-
-      if (!roleId || isNaN(roleId)) {
-        return res.status(400).json({ error: "Valid role ID is required" });
-      }
-
-      const members = await roleService.getRoleMembers(roleId);
-
-      res.json({ data: {
-        roleId: roleId,
-        members: members,
-        totalCount: members.length
-      } });
-    } catch (err) {
-      console.error("Error fetching role members:", err.message);
-      res.status(500).json({ error: "Failed to fetch role members" });
-    }
-  }
 
   /**
    * Update member permissions

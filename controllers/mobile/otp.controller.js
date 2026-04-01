@@ -140,7 +140,12 @@ class OtpController {
         is_new_user: isNewUser,
         requires_profile: !client.prof_id,
         token,
-        client,
+        client: {
+          client_id: client.client_id,
+          client_number: client.client_number,
+          client_country_code: client.client_country_code,
+          prof_id: client.prof_id,
+        },
       } });
     } catch (err) {
       console.error("Verify OTP error:", err);

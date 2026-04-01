@@ -24,7 +24,7 @@ class RedisCacheManager {
       CHANGE_ROLE: 'change_role:',
       CANNED_MESSAGES: 'canned_messages:',
       ONLINE_USERS: 'online_users:',
-      USER_STATUS: 'user_status:',
+      USER_PRESENCE: 'user_presence:',
       TYPING: 'typing:',
       RATE_LIMIT: 'rate_limit:',
       SYSTEM_CONFIG: 'system_config:'
@@ -43,7 +43,7 @@ class RedisCacheManager {
       CHANGE_ROLE: 60 * 60,            // 1 hour (user role changes moderately)
       CANNED_MESSAGES: 60 * 60,        // 1 hour
       ONLINE_USERS: 60,                // 1 minute (real-time data)
-      USER_STATUS: 45,                 // 45 seconds (heartbeat data)
+      USER_PRESENCE: 15 * 60,           // 15 minutes (auto-expire if no heartbeat)
       TYPING: 10,                      // 10 seconds (typing indicators)
       RATE_LIMIT: 60 * 60,             // 1 hour
       SYSTEM_CONFIG: 12 * 60 * 60      // 12 hours
@@ -135,7 +135,7 @@ class RedisCacheManager {
       const data = await this.client.get(key);
       
       if (data) {
-        console.log(`✅ Cache HIT: ${key}`);
+        // console.log(`✅ Cache HIT: ${key}`);
         return JSON.parse(data);
       }
       
@@ -413,32 +413,108 @@ class RedisCacheManager {
     return deletedCount;
   }
 
-  // Online user management
-  async setUserOnline(userId, userData) {
-    const onlineData = {
-      ...userData,
-      lastSeen: new Date(),
-      status: 'online'
-    };
-    
-    await this.setHashField('ONLINE_USERS', 'active', userId, onlineData);
-    await this.set('USER_STATUS', userId, onlineData, this.ttlPolicies.USER_STATUS);
-  }
 
-  async setUserOffline(userId) {
-    const userData = await this.getHashField('ONLINE_USERS', 'active', userId);
-    
-    if (userData) {
-      userData.status = 'offline';
-      userData.lastSeen = new Date();
-      
-      await this.client.hDel(this.generateKey('ONLINE_USERS', 'active'), userId);
-      await this.set('USER_STATUS', userId, userData, this.ttlPolicies.USER_STATUS);
+  /**
+   * USER PRESENCE MANAGEMENT
+   * Handles 3-state agent status: accepting_chats, not_accepting_chats, offline
+   */
+
+  async setUserPresence(userId, userPresenceData) {
+    if (!this.isConnected) return false;
+
+    try {
+      const { userPresence, socketId, userType, lastSeen, deptIds } = userPresenceData;
+
+      // Validate agent status
+      const validStatuses = ['accepting_chats', 'not_accepting_chats', 'offline'];
+      if (!validStatuses.includes(userPresence)) {
+        console.error(`❌ Invalid user presence: ${userPresence}`);
+        return false;
+      }
+
+      const statusData = {
+        userId,
+        userPresence,
+        socketId: socketId || null,
+        userType: userType || 'Agent',
+        lastSeen: lastSeen || new Date(),
+        updatedAt: new Date(),
+        deptIds: deptIds || [],
+      };
+
+      // Store in hash for efficient retrieval of all agent statuses
+      await this.setHashField('USER_PRESENCE', 'all', userId.toString(), statusData, 15 * 60);
+
+      console.log(`✅ User presence SET: userId=${userId}, user presence=${userPresence}`);
+      return true;
+    } catch (error) {
+      console.error('❌ setAgentStatus error:', error.message);
+      return false;
     }
   }
 
-  async getOnlineUsers() {
-    return await this.getHashAll('ONLINE_USERS', 'active') || {};
+  async getUserPresence(userId) {
+    if (!this.isConnected) return null;
+
+    try {
+      const presence = await this.getHashField('USER_PRESENCE', 'all', userId.toString());
+      
+      if (presence) {
+        console.log(`User Presence GET: userId=${userId}, status=${presence.userPresence}`);
+      }
+      
+      return presence;
+    } catch (error) {
+      console.error('❌ setUserPresence error:', error.message);
+      return null;
+    }
+  }
+
+  async getAllUserPresence() {
+    if (!this.isConnected) return {};
+
+    try {
+      const userPresences = await this.getHashAll('USER_PRESENCE', 'all');
+      console.log(`✅ Retrieved all user Presences (${Object.keys(userPresences || {}).length} users)`);
+      return userPresences || {};
+    } catch (error) {
+      console.error('getAllUserPresence error:',  error.message);
+      return {};
+    }
+  }
+
+  async removeUserPresence(userId) {
+    if (!this.isConnected) return false;
+
+    try {
+      const key = this.generateKey('USER_PRESENCE', 'all');
+      await this.client.hDel(key, userId.toString());
+      console.log(`✅ User Presence REMOVED: userId=${userId}`);
+      return true;
+    } catch (error) {
+      console.error('removeAgentStatus error:', error.message);
+      return false;
+    }
+  }
+
+  async updateUserHeartbeat(userId) {
+    if (!this.isConnected) return false;
+
+    try {
+      const userPresence = await this.getUserPresence(userId);
+      
+      if (userPresence) {
+        userPresence.lastSeen = new Date();
+        await this.setUserPresence(userId, userPresence);
+        console.log(`💓 User heartbeat updated: userId=${userId}`);
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('❌ updateAgentHeartbeat error:', error.message);
+      return false;
+    }
   }
 
   // Chat message caching
@@ -486,7 +562,7 @@ class RedisCacheManager {
       return allowed;
     } catch (error) {
       console.error(`❌ Rate limit error:`, error.message);
-      return true; // Allow on error
+      return false; // Fail closed: deny on error
     }
   }
 

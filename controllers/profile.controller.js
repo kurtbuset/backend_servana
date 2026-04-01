@@ -22,13 +22,7 @@ class ProfileController {
     // Upload profile image
     router.post("/image", checkPermission(PERMISSIONS.MANAGE_PROFILE), upload.single("image"), (req, res) => this.uploadProfileImage(req, res));
 
-    // Get agent status
-    router.get("/agent-status", (req, res) => this.getAgentStatus(req, res));
-
-    // Update agent status
-    router.put("/agent-status", (req, res) => this.updateAgentStatus(req, res));
-
-    return router;
+    return router;  
   }
   /**
    * Get current user profile
@@ -37,94 +31,28 @@ class ProfileController {
     try {
       const sysUserId = req.userId;
 
-      const { userRow, profRow } = await profileService.fetchUserAndProfile(sysUserId);
-      
-      // Only fetch image if profile exists and has a prof_id
-      let image = null;
-      if (profRow && profRow.prof_id) {
-        image = await profileService.fetchCurrentImage(profRow.prof_id);
-      }
+      // Fetch all data in parallel for better performance
+      const [
+        { userRow, profRow },
+        departments
+      ] = await Promise.all([
+        profileService.fetchUserAndProfile(sysUserId),
+        profileService.fetchUserDepartments(sysUserId)
+      ]);
 
-      // Fetch user's role privileges
-      let privileges = null;
-      if (userRow.role_id) {
-        try {
-          // First get the role to find the priv_id
-          const { data: roleData, error: roleError } = await require("../helpers/supabaseClient")
-            .from("role")
-            .select("priv_id, role_name")
-            .eq("role_id", userRow.role_id)
-            .single();
-
-          if (!roleError && roleData?.priv_id) {
-            // Then fetch the privilege data using the priv_id
-            const { data: privData, error: privError } = await require("../helpers/supabaseClient")
-              .from("privilege")
-              .select(`
-                priv_id,
-                priv_can_view_message,
-                priv_can_message,
-                priv_can_manage_profile,
-                priv_can_use_canned_mess,
-                priv_can_end_chat,
-                priv_can_transfer,
-                priv_can_view_dept,
-                priv_can_add_dept,
-                priv_can_edit_dept,
-                priv_can_manage_dept,
-                priv_can_assign_dept,
-                priv_can_manage_role,
-                priv_can_assign_role,
-                priv_can_create_account,
-                priv_can_view_auto_reply,
-                priv_can_add_auto_reply,
-                priv_can_edit_auto_reply,
-                priv_can_delete_auto_reply,
-                priv_can_manage_auto_reply,
-                priv_can_view_macros,
-                priv_can_add_macros,
-                priv_can_edit_macros,
-                priv_can_delete_macros,
-                priv_can_view_change_roles,
-                priv_can_edit_change_roles,
-                priv_can_view_manage_agents,
-                priv_can_view_agents_info,
-                priv_can_create_agent_account,
-                priv_can_edit_manage_agents,
-                priv_can_edit_dept_manage_agents,
-                priv_can_view_analytics_manage_agents
-              `)
-              .eq("priv_id", roleData.priv_id)
-              .single();
-
-            if (!privError && privData) {
-              privileges = privData;
-              // Privilege values available
-            } else {
-              console.error("❌ Failed to fetch privilege data:", privError);
-              console.error("❌ Attempted to fetch priv_id:", roleData.priv_id);
-            }
-          } else {
-            console.error("❌ Failed to fetch role data or no priv_id found:", roleError);
-            console.error("❌ Attempted to fetch role_id:", userRow.role_id);
-          }
-        } catch (privError) {
-          console.error("❌ Exception while fetching user privileges:", privError.message);
-        }
-      } else {
-        console.warn("⚠️ User has no role_id assigned");
-      }
-
-      // Fetch user departments
-      const departments = await profileService.fetchUserDepartments(sysUserId);
+      // Fetch image and privileges in parallel (only if needed)
+      const [image, privileges] = await Promise.all([
+        profRow?.prof_id ? profileService.fetchCurrentImage(profRow.prof_id) : Promise.resolve(null),
+        userRow.role_id ? profileService.fetchUserPrivileges(userRow.role_id) : Promise.resolve(null)
+      ]);
 
       const responseData = {
         sys_user_id: userRow.sys_user_id,
         sys_user_email: userRow.sys_user_email,
         role_id: userRow.role_id,
         role_name: userRow.role?.role_name || null,
-        privilege: privileges, // Add privileges to the response
-        departments: departments, // Add departments to the response
+        privilege: privileges,
+        departments: departments,
         profile: profRow,
         image,
       };
@@ -213,71 +141,6 @@ class ProfileController {
       }
       
       res.status(500).json({ error: "Server error uploading image" });
-    }
-  }
-
-  /**
-   * Get agent status
-   */
-  async getAgentStatus(req, res) {
-    try {
-      const sysUserId = req.userId;
-
-      const agentStatus = await profileService.getAgentStatus(sysUserId);
-
-      res.json({ data: {
-        agent_status: agentStatus
-      } });
-    } catch (err) {
-      console.error("Error fetching agent status:", err.message);
-      
-      if (err.message === "User not found") {
-        return res.status(404).json({ error: err.message });
-      }
-      
-      res.status(500).json({ error: "Server error fetching agent status" });
-    }
-  }
-
-  /**
-   * Update agent status
-   */
-  async updateAgentStatus(req, res) {
-    try {
-      const sysUserId = req.userId;
-      const { agent_status } = req.body;
-
-      if (!agent_status) {
-        return res.status(400).json({ error: "agent_status is required" });
-      }
-
-      // Update via service
-      await profileService.updateAgentStatus(sysUserId, agent_status);
-
-      // Broadcast via socket if available
-      const io = req.app.get('io');
-      if (io) {
-        const { broadcastStatusChangeToDepartments } = require("../socket/agent-status");
-        await broadcastStatusChangeToDepartments(io, sysUserId, agent_status, "agent", new Date());
-        console.log(`📡 Broadcasted agent status change via REST API: ${agent_status}`);
-      }
-
-      res.json({ data: {
-        message: "Agent status updated successfully",
-        agent_status
-      } });
-    } catch (err) {
-      console.error("Error updating agent status:", err.message);
-      
-      if (err.message === "User not found") {
-        return res.status(404).json({ error: err.message });
-      }
-      
-      if (err.message.includes("Invalid agent status")) {
-        return res.status(400).json({ error: err.message });
-      }
-      
-      res.status(500).json({ error: "Server error updating agent status" });
     }
   }
 }

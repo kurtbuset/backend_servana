@@ -5,6 +5,7 @@ const { checkPermission } = require("../middleware/checkPermission");
 const { PERMISSIONS } = require("../constants/permissions");
 const { formatChatGroups } = require("../utils/formatChatGroups");
 const { getProfileImages, getLatestMessageTimes } = require("../utils/messageHelpers");
+const { handleChatAccepted } = require("../socket/customer-list");
 
 class QueueController {
   getRouter() {
@@ -83,42 +84,10 @@ class QueueController {
 
       const chatGroup = await queueService.acceptChat(chatGroupId, userId);
 
-      // Emit socket notifications
-      const io = req.app.get("io");
+      // Emit customerListUpdate so other agents remove this chat from their queue
+      const io = req.app.get('io');
       if (io) {
-        // Get department ID to broadcast to the right room
-        const chatGroupDetails = await queueService.getChatGroupDetails(
-          chatGroupId,
-        );
-
-        if (chatGroupDetails && chatGroupDetails.dept_id) {
-          // 1. Send new_assignment to the agent who accepted (so it appears in their list as active)
-          const {
-            handleChatAssignment,
-          } = require("../socket/customer-list");
-          await handleChatAssignment(io, chatGroupId, userId);
-
-          // 2. Emit remove_chat_group to all OTHER agents in the department
-          io.to(`department_${chatGroupDetails.dept_id}`).emit(
-            "customerListUpdate",
-            {
-              type: "remove_chat_group",
-              data: {
-                chat_group_id: chatGroupId,
-                accepted_by: userId,
-                department_id: chatGroupDetails.dept_id,
-              },
-            },
-          );
-        }
-
-        // Legacy notification system (if exists)
-        if (io.socketConfig) {
-          const notifier = io.socketConfig.getChatGroupNotifier();
-          if (notifier && chatGroupDetails) {
-            await notifier.notifyChatAccepted(chatGroupDetails, userId);
-          }
-        }
+        await handleChatAccepted(io, chatGroupId, userId);
       }
 
       res.json({ data: {
@@ -155,34 +124,7 @@ class QueueController {
         return res.status(404).json({ error: "Chat group not found" });
       }
 
-      const groupIdsToFetch = [];
-
-      // Process each group
-      for (const group of groups) {
-        const { chat_group_id, sys_user_id } = group;
-
-        // if (sys_user_id === null) {
-        //   // Update chat_group.sys_user_id to current user
-        //   await queueService.assignChatGroupToUser(chat_group_id, userId);
-
-        //   // Check if sys_user_chat_group already exists
-        //   const existingLink = await queueService.checkUserChatGroupLink(userId, chat_group_id);
-
-        //   // Insert new sys_user_chat_group link if not exists
-        //   if (!existingLink) {
-        //     await queueService.createUserChatGroupLink(userId, chat_group_id);
-        //   }
-
-        //   groupIdsToFetch.push(chat_group_id);
-        // } else {
-        //   // Still add to groupIdsToFetch if user already linked
-        //   const existingLink = await queueService.checkUserChatGroupLink(userId, chat_group_id);
-
-        //   if (existingLink) {
-        groupIdsToFetch.push(chat_group_id);
-        // }
-        // }
-      }
+      const groupIdsToFetch = groups.map((g) => g.chat_group_id);
 
       // Fetch chats
       const messages = await queueService.getChatMessages(
