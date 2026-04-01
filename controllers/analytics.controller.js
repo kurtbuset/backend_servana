@@ -26,6 +26,45 @@ class AnalyticsController {
 
     // Dashboard stats without auth for testing
     router.get('/dashboard-stats-test', (req, res) => this.getDashboardStats(req, res));
+    
+    // Test ratings endpoint without auth
+    router.get('/ratings-test', async (req, res) => {
+      try {
+        const supabase = require('../helpers/supabaseClient');
+        const { data, error } = await supabase
+          .from('chat_feedback')
+          .select('rating, created_at')
+          .not('rating', 'is', null)
+          .limit(100);
+        
+        if (error) throw error;
+        
+        const totalRatings = data.length;
+        const averageRating = totalRatings > 0 
+          ? data.reduce((sum, f) => sum + f.rating, 0) / totalRatings 
+          : 0;
+        
+        const ratingDistribution = {
+          1: data.filter(f => f.rating === 1).length,
+          2: data.filter(f => f.rating === 2).length,
+          3: data.filter(f => f.rating === 3).length,
+          4: data.filter(f => f.rating === 4).length,
+          5: data.filter(f => f.rating === 5).length
+        };
+        
+        res.json({
+          success: true,
+          data: {
+            averageRating: Number(averageRating.toFixed(1)),
+            totalRatings,
+            ratingDistribution,
+            sampleData: data.slice(0, 5)
+          }
+        });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
 
     // Temporary test endpoint to verify frontend can reach backend
     router.get('/connection-test', (req, res) => {
@@ -50,6 +89,8 @@ class AnalyticsController {
     router.get('/response-time', (req, res) => this.getResponseTimeAnalytics(req, res));
     router.get('/enhanced-response-time', (req, res) => this.getEnhancedResponseTimeAnalytics(req, res));
     router.get('/agent-performance', (req, res) => this.getAgentPerformanceAnalytics(req, res));
+    router.get('/agent-analytics/:agentId', (req, res) => this.getAgentAnalytics(req, res));
+    router.get('/comprehensive-stats', (req, res) => this.getComprehensiveDashboardStats(req, res));
     router.get('/customer-satisfaction', (req, res) => this.getCustomerSatisfactionAnalytics(req, res));
     router.get('/top-conversations', (req, res) => this.getTopConversations(req, res));
     router.get('/department-rankings', (req, res) => this.getDepartmentRankings(req, res));
@@ -142,6 +183,7 @@ class AnalyticsController {
    */
   async getEnhancedResponseTimeAnalytics(req, res) {
     try {
+      // Since the enhanced function is temporarily disabled, use the regular response time analytics
       const { period = 'weekly', date, week, month, year } = req.query;
       
       // Validate period
@@ -165,14 +207,15 @@ class AnalyticsController {
         dateParams.year = year;
       }
 
-      const data = await AnalyticsService.getEnhancedResponseTimeAnalytics(period, dateParams);
+      // Use regular response time analytics as fallback
+      const data = await AnalyticsService.getResponseTimeAnalytics(period, dateParams);
       
       res.json({
         success: true,
         data,
         meta: {
-          formula: 'ART = Total Response Time / Total Number of Responses',
-          description: 'Comprehensive response time analytics tracking all agent responses'
+          formula: 'Using regular response time analytics (enhanced version temporarily disabled)',
+          description: 'Response time analytics with fallback implementation'
         }
       });
     } catch (error) {
@@ -465,6 +508,71 @@ class AnalyticsController {
         success: false,
         message: error.message || 'Failed to recalculate response times'
       });
+    }
+  }
+
+  /**
+   * Get agent-specific analytics
+   * GET /api/analytics/agent-analytics/:agentId
+   */
+  async getAgentAnalytics(req, res) {
+    try {
+      const { agentId } = req.params;
+      const { period = 'weekly', date, week, month, year } = req.query;
+      
+      // Validate period
+      const validPeriods = ['daily', 'weekly', 'monthly', 'yearly'];
+      if (!validPeriods.includes(period)) {
+        return res.status(400).json({
+          error: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
+        });
+      }
+
+      // Pass date/week/month/year parameters to service
+      const dateParams = {};
+      if (period === 'daily' && date) {
+        dateParams.date = date;
+      } else if (period === 'weekly' && week) {
+        dateParams.week = week;
+      } else if (period === 'monthly' && month) {
+        dateParams.month = month;
+      } else if (period === 'yearly' && year) {
+        dateParams.year = year;
+      }
+
+      const data = await AnalyticsService.getAgentAnalytics(parseInt(agentId), period, dateParams);
+      
+      res.json({ data });
+    } catch (error) {
+      console.error('Error in getAgentAnalytics:', error);
+      res.status(500).json({ error: error.message || 'Failed to fetch agent analytics' });
+    }
+  }
+
+  /**
+   * Get comprehensive dashboard statistics
+   * GET /api/analytics/comprehensive-stats
+   */
+  async getComprehensiveDashboardStats(req, res) {
+    try {
+      const { agentOnly = 'false', date, week, month, year } = req.query;
+      
+      // Determine if we should filter by current agent
+      const agentId = agentOnly === 'true' ? req.userId : null;
+
+      // Pass date/week/month/year parameters to service
+      const dateParams = {};
+      if (date) dateParams.date = date;
+      if (week) dateParams.week = week;
+      if (month) dateParams.month = month;
+      if (year) dateParams.year = year;
+
+      const data = await AnalyticsService.getComprehensiveDashboardStats(agentId, dateParams);
+      
+      res.json({ data });
+    } catch (error) {
+      console.error('Error in getComprehensiveDashboardStats:', error);
+      res.status(500).json({ error: error.message || 'Failed to fetch comprehensive dashboard stats' });
     }
   }
 }
