@@ -1,6 +1,9 @@
 const supabase = require("../helpers/supabaseClient");
 const cacheService = require("./cache.service");
-const { cacheManager, default: redisClient } = require("../helpers/redisClient");
+const {
+  cacheManager,
+  default: redisClient,
+} = require("../helpers/redisClient");
 const { USER_PRESENCE_STATUS, CHAT_STATUS } = require("../constants/statuses");
 
 class AgentAssignmentService {
@@ -16,12 +19,18 @@ class AgentAssignmentService {
     try {
       const val = await redisClient.get(`${this.REDIS_KEY_PREFIX}${deptId}`);
       return val ? parseInt(val, 10) : null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
 
   async setLastAssignedAgent(deptId, agentId) {
     try {
-      await redisClient.setex(`${this.REDIS_KEY_PREFIX}${deptId}`, this.REDIS_TTL, String(agentId));
+      await redisClient.setex(
+        `${this.REDIS_KEY_PREFIX}${deptId}`,
+        this.REDIS_TTL,
+        String(agentId),
+      );
     } catch (e) {
       console.error("❌ Error setting last assigned agent:", e.message);
     }
@@ -33,9 +42,11 @@ class AgentAssignmentService {
     try {
       const presences = await cacheManager.getAllUserPresence();
       return Object.entries(presences)
-        .filter(([_, p]) =>
-          p.userPresence === USER_PRESENCE_STATUS.ACCEPTING_CHATS &&
-          Array.isArray(p.deptIds) && p.deptIds.includes(deptId)
+        .filter(
+          ([_, p]) =>
+            p.userPresence === USER_PRESENCE_STATUS.ACCEPTING_CHATS &&
+            Array.isArray(p.deptIds) &&
+            p.deptIds.includes(deptId),
         )
         .map(([id]) => parseInt(id, 10));
     } catch (e) {
@@ -54,7 +65,9 @@ class AgentAssignmentService {
         .in("sys_user_id", agentIds)
         .eq("status", CHAT_STATUS.ACTIVE);
       if (error) throw error;
-      data?.forEach(({ sys_user_id }) => { if (sys_user_id in workloads) workloads[sys_user_id]++; });
+      data?.forEach(({ sys_user_id }) => {
+        if (sys_user_id in workloads) workloads[sys_user_id]++;
+      });
     } catch (e) {
       console.error("❌ getAgentWorkloads:", e.message);
     }
@@ -67,8 +80,12 @@ class AgentAssignmentService {
 
     try {
       const workloadMap = await this.getAgentWorkloads(availableAgents);
-      const minWorkload = Math.min(...availableAgents.map((id) => workloadMap[id]));
-      const candidates = availableAgents.filter((id) => workloadMap[id] === minWorkload);
+      const minWorkload = Math.min(
+        ...availableAgents.map((id) => workloadMap[id]),
+      );
+      const candidates = availableAgents.filter(
+        (id) => workloadMap[id] === minWorkload,
+      );
 
       let selected;
       if (candidates.length === 1) {
@@ -80,7 +97,9 @@ class AgentAssignmentService {
       }
 
       await this.setLastAssignedAgent(deptId, selected);
-      console.log(`🔄 Round-robin → agent ${selected} for dept ${deptId} (workload: ${minWorkload})`);
+      console.log(
+        `🔄 Round-robin → agent ${selected} for dept ${deptId} (workload: ${minWorkload})`,
+      );
       return selected;
     } catch (e) {
       console.error("❌ selectNextAgent:", e.message);
@@ -121,8 +140,10 @@ class AgentAssignmentService {
       .limit(1);
 
     if (logErr) console.error("⚠️ Transfer log update failed:", logErr.message);
-    console.log('yeah!')
-    await cacheService.cacheChatGroup(chatGroupId, data);
+
+    // Invalidate agent's chat groups cache (new chat assigned)
+    await cacheService.invalidateUserChatGroups(agentId);
+
     console.log(`✅ Chat ${chatGroupId} → agent ${agentId}`);
     return data;
   }
@@ -135,19 +156,21 @@ class AgentAssignmentService {
       .select()
       .single();
     if (error) throw error;
-    console.log(`📥 Chat ${chatGroupId} queued`);
     return data;
   }
 
   // --- Orchestration ---
 
   async autoAssignChatGroup(chatGroupId, deptId) {
-    console.log(`🔍 Auto-assigning chat ${chatGroupId} in dept ${deptId}`);
     const available = await this.getAvailableAgents(deptId);
 
     if (!available.length) {
       await this.setChatGroupQueued(chatGroupId);
-      return { assigned: false, status: "queued", message: "No available agents" };
+      return {
+        assigned: false,
+        status: "queued",
+        message: "No available agents",
+      };
     }
 
     const agentId = await this.selectNextAgent(available, deptId);
@@ -156,7 +179,6 @@ class AgentAssignmentService {
   }
 
   async assignQueuedChatsToAgent(agentId) {
-    console.log(`🔍 Draining queue for agent ${agentId}`);
 
     const { data: depts, error: deptErr } = await supabase
       .from("sys_user_department")
@@ -166,7 +188,8 @@ class AgentAssignmentService {
     if (deptErr || !depts?.length) return [];
 
     const presence = await cacheManager.getUserPresence(agentId);
-    if (presence?.userPresence !== USER_PRESENCE_STATUS.ACCEPTING_CHATS) return [];
+    if (presence?.userPresence !== USER_PRESENCE_STATUS.ACCEPTING_CHATS)
+      return [];
 
     const workloads = await this.getAgentWorkloads([agentId]);
     const slots = Math.max(0, this.MAX_WORKLOAD - (workloads[agentId] ?? 0));
@@ -186,13 +209,23 @@ class AgentAssignmentService {
     const assigned = [];
     for (const chat of queued) {
       if (assigned.length >= slots) break;
-      const result = await this.autoAssignChatGroup(chat.chat_group_id, chat.dept_id);
+      const result = await this.autoAssignChatGroup(
+        chat.chat_group_id,
+        chat.dept_id,
+      );
       if (result.assigned && result.agentId === agentId) {
-        assigned.push({ chat_group_id: chat.chat_group_id, dept_id: chat.dept_id, client_id: chat.client_id, status: "active" });
+        assigned.push({
+          chat_group_id: chat.chat_group_id,
+          dept_id: chat.dept_id,
+          client_id: chat.client_id,
+          status: "active",
+        });
       }
     }
 
-    console.log(`✅ Assigned ${assigned.length} queued chats to agent ${agentId}`);
+    console.log(
+      `✅ Assigned ${assigned.length} queued chats to agent ${agentId}`,
+    );
     return assigned;
   }
 }

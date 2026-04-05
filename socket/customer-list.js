@@ -19,6 +19,7 @@ async function getChatGroupInfo(chatGroupId) {
         dept_id,
         sys_user_id,
         status,
+        created_at,
         department:dept_id (
           dept_name
         )
@@ -76,6 +77,9 @@ async function getClientInfo(clientId) {
  * Build customerListUpdate payload
  */
 function buildCustomerUpdate(type, chatGroupInfo, clientInfo, agentId) {
+  // Determine chat_type based on status
+  const chat_type = chatGroupInfo.status === "queued" ? "queued" : "active";
+
   return {
     type,
     data: {
@@ -85,9 +89,11 @@ function buildCustomerUpdate(type, chatGroupInfo, clientInfo, agentId) {
         number: clientInfo.client_number,
         profile: clientInfo.profile_image,
         status: chatGroupInfo.status,
+        chat_type: chat_type,
         department: chatGroupInfo.department?.dept_name || "Unknown",
         sys_user_id: chatGroupInfo.sys_user_id,
         dept_id: chatGroupInfo.dept_id,
+        created_at: chatGroupInfo.created_at,
       },
       agentId: agentId || null,
       chat_group_id: chatGroupInfo.chat_group_id,
@@ -99,7 +105,7 @@ function buildCustomerUpdate(type, chatGroupInfo, clientInfo, agentId) {
 
 /**
  * Handle new chat assignment (auto-assigned via round-robin)
- * Emits customerListUpdate with type 'assigned' only to agents in the same department
+ * Emits customerListUpdate with type 'assigned' only to the assigned agent
  */
 async function handleChatAssignment(io, chatGroupId, agentId) {
   try {
@@ -109,14 +115,21 @@ async function handleChatAssignment(io, chatGroupId, agentId) {
     const clientInfo = await getClientInfo(chatGroupInfo.client_id);
     if (!clientInfo) return;
 
-    const payload = buildCustomerUpdate('assigned', chatGroupInfo, clientInfo, agentId);
-    console.log('payload: ', JSON.stringify(payload, null, 2))
-    // Emit only to agents in the same department
-    const departmentRoom = `department_${chatGroupInfo.dept_id}`;
-    io.to(departmentRoom).emit('customerListUpdate', payload);
+    const payload = buildCustomerUpdate(
+      "assigned",
+      chatGroupInfo,
+      clientInfo,
+      agentId,
+    );
+    console.log("payload: ", JSON.stringify(payload, null, 2));
 
+    // Emit only to the assigned agent
+    const agentRoom = `user_${agentId}`;
+    io.to(agentRoom).emit("customerListUpdate", payload);
 
-    console.log(`📋 customerListUpdate: assigned chat ${chatGroupId} to agent ${agentId} in dept ${chatGroupInfo.dept_id} (room: ${departmentRoom})`);
+    console.log(
+      `📋 customerListUpdate: assigned chat ${chatGroupId} to agent ${agentId} (room: ${agentRoom})`,
+    );
   } catch (error) {
     console.error("❌ Error handling chat assignment update:", error);
   }
@@ -135,13 +148,26 @@ async function handleChatQueued(io, chatGroupId, deptId) {
     const clientInfo = await getClientInfo(chatGroupInfo.client_id);
     if (!clientInfo) return;
 
-    const payload = buildCustomerUpdate('new_queued_chat', chatGroupInfo, clientInfo, null);
-    
+    const payload = buildCustomerUpdate(
+      "new_queued_chat",
+      chatGroupInfo,
+      clientInfo,
+      null,
+    );
+
+    console.log(
+      "📋 new_queued_chat payload:",
+      JSON.stringify(payload, null, 2),
+    );
+
     // Emit only to agents in the same department
     const departmentRoom = `department_${deptId}`;
-    io.to(departmentRoom).emit('customerListUpdate', payload);
 
-    console.log(`📋 customerListUpdate: new_queued_chat ${chatGroupId} in dept ${deptId} (room: ${departmentRoom})`);
+    io.to(departmentRoom).emit("customerListUpdate", payload);
+
+    console.log(
+      `📋 customerListUpdate: new_queued_chat ${chatGroupId} in dept ${deptId} (room: ${departmentRoom})`,
+    );
   } catch (error) {
     console.error("❌ Error handling chat queued update:", error);
   }
@@ -149,7 +175,6 @@ async function handleChatQueued(io, chatGroupId, deptId) {
 
 /**
  * Handle chat manually accepted from queue
- * Emits customerListUpdate with type 'chat_accepted' so other agents remove it from their list
  */
 async function handleChatAccepted(io, chatGroupId, agentId) {
   try {
@@ -159,10 +184,14 @@ async function handleChatAccepted(io, chatGroupId, agentId) {
     const clientInfo = await getClientInfo(chatGroupInfo.client_id);
     if (!clientInfo) return;
 
-    const payload = buildCustomerUpdate('chat_accepted', chatGroupInfo, clientInfo, agentId);
-    io.emit('customerListUpdate', payload);
+    const payload = buildCustomerUpdate(
+      "remove_chat_group",
+      chatGroupInfo,
+      clientInfo,
+      agentId,
+    );
+    io.emit("customerListUpdate", payload);
 
-    console.log(`📋 customerListUpdate: chat_accepted ${chatGroupId} by agent ${agentId}`);
   } catch (error) {
     console.error("❌ Error handling chat accepted update:", error);
   }

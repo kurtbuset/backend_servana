@@ -223,8 +223,6 @@ class ChatController {
             // Emit only to the assigned agent
             const agentRoom = `agent_${chatGroupInfo.sys_user_id}`;
             io.to(agentRoom).emit('customerListUpdate', moveToTopPayload);
-
-            console.log(`📋 customerListUpdate: move_to_top for transferred chat ${chatGroupId} to agent ${chatGroupInfo.sys_user_id}`);
           }
         }
       }

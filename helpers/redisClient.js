@@ -59,11 +59,6 @@ class RedisCacheManager {
       const port = process.env.REDIS_PORT || 6379;
       const password = process.env.REDIS_PASSWORD || undefined;
 
-      // console.log('🔧 Redis configuration:');
-      // console.log('   Host:', host, process.env.REDIS_HOST ? '(from env)' : '(default)');
-      // console.log('   Port:', port, process.env.REDIS_PORT ? '(from env)' : '(default)');
-      // console.log('   Password:', password ? '***' : 'none', process.env.REDIS_PASSWORD ? '(from env)' : '(default)');
-
       this.client = redis.createClient({
         socket: {
           host: host,
@@ -156,7 +151,7 @@ class RedisCacheManager {
       const ttl = customTTL || this.ttlPolicies[prefix];
       
       await this.client.setEx(key, ttl, JSON.stringify(data));
-      console.log(`✅ Cache SET: ${key} (TTL: ${ttl}s)`);
+      // console.log(`✅ Cache SET: ${key} (TTL: ${ttl}s)`);
       return true;
     } catch (error) {
       console.error(`❌ Cache SET error for ${prefix}:`, error.message);
@@ -306,7 +301,6 @@ class RedisCacheManager {
         await this.client.expire(key, ttl || this.ttlPolicies[prefix]);
       }
       
-      console.log(`✅ Hash SET: ${key}.${field}`);
       return true;
     } catch (error) {
       console.error(`❌ Hash SET error for ${prefix}:`, error.message);
@@ -323,7 +317,7 @@ class RedisCacheManager {
       const value = await this.client.hGet(key, field);
       
       if (value) {
-        console.log(`✅ Hash GET: ${key}.${field}`);
+        // console.log(`✅ Hash GET: ${key}.${field}`);
         return JSON.parse(value);
       }
       
@@ -444,8 +438,6 @@ class RedisCacheManager {
 
       // Store in hash for efficient retrieval of all agent statuses
       await this.setHashField('USER_PRESENCE', 'all', userId.toString(), statusData, 15 * 60);
-
-      console.log(`✅ User presence SET: userId=${userId}, user presence=${userPresence}`);
       return true;
     } catch (error) {
       console.error('❌ setAgentStatus error:', error.message);
@@ -458,10 +450,6 @@ class RedisCacheManager {
 
     try {
       const presence = await this.getHashField('USER_PRESENCE', 'all', userId.toString());
-      
-      if (presence) {
-        console.log(`User Presence GET: userId=${userId}, status=${presence.userPresence}`);
-      }
       
       return presence;
     } catch (error) {
@@ -489,7 +477,6 @@ class RedisCacheManager {
     try {
       const key = this.generateKey('USER_PRESENCE', 'all');
       await this.client.hDel(key, userId.toString());
-      console.log(`✅ User Presence REMOVED: userId=${userId}`);
       return true;
     } catch (error) {
       console.error('removeAgentStatus error:', error.message);
@@ -506,7 +493,6 @@ class RedisCacheManager {
       if (userPresence) {
         userPresence.lastSeen = new Date();
         await this.setUserPresence(userId, userPresence);
-        console.log(`💓 User heartbeat updated: userId=${userId}`);
         return true;
       }
       

@@ -280,10 +280,9 @@ function initializeSocket(server, allowedOrigins) {
           );
         }
 
-        console.log('recipientIsActive: ', recipientIsActive)
         if (recipientIsActive) {
           // Recipient is active - also mark as read
-          await supabase
+          await supabase  
             .from("chat")
             .update({ chat_read_at: timestamp })
             .eq("chat_id", message.chat_id);

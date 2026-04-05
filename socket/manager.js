@@ -71,8 +71,6 @@ class SocketManager {
    * Stop the manager
    */
   stop() {
-    console.log('🛑 Stopping Socket Manager');
-    
     if (this.idleCheckInterval) {
       clearInterval(this.idleCheckInterval);
       this.idleCheckInterval = null;

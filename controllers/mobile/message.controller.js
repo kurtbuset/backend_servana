@@ -122,7 +122,6 @@ class MobileMessageController {
 
       const result = await mobileMessageService.createChatGroup(department, clientId);
 
-      console.log('result: ', result.assigned)
       // Emit customerListUpdate to agents
       const io = req.app.get('io');
       if (io) {

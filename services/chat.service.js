@@ -2,7 +2,11 @@ const supabase = require("../helpers/supabaseClient");
 const cacheService = require("./cache.service");
 const cookie = require("cookie");
 const agentAssignmentService = require("./agentAssignment.service");
-const { determineSenderType, getSenderName, getSenderImageOptimized } = require("../utils/messageHelpers");
+const {
+  determineSenderType,
+  getSenderName,
+  getSenderImageOptimized,
+} = require("../utils/messageHelpers");
 
 class ChatService {
   /**
@@ -11,10 +15,9 @@ class ChatService {
   async getCannedMessagesByRole(roleId, userId = null) {
     try {
       const messages = await cacheService.getCannedMessages(roleId, userId);
-      console.log(`📝 Found ${messages?.length || 0} canned messages for role ${roleId}${userId ? ` and user ${userId}` : ''}`);
       return messages;
     } catch (error) {
-      console.error('❌ Error fetching canned messages:', error.message);
+      console.error("❌ Error fetching canned messages:", error.message);
       throw error;
     }
   }
@@ -25,7 +28,7 @@ class ChatService {
   async getUserRole(userId) {
     try {
       // Try to get from user profile cache first
-      const profile = await cacheService.getUserProfile(userId, 'agent');
+      const profile = await cacheService.getUserProfile(userId, "agent");
       if (profile && profile.role_id) {
         return profile.role_id;
       }
@@ -43,7 +46,7 @@ class ChatService {
 
       return userData.role_id;
     } catch (error) {
-      console.error('❌ Error fetching user role:', error.message);
+      console.error("❌ Error fetching user role:", error.message);
       throw error;
     }
   }
@@ -54,16 +57,22 @@ class ChatService {
   async getChatGroupsByUser(userId) {
     try {
       // Try to get from cache first
-      const cacheKey = `user_chat_groups_${userId}`;
-      let groups = await cacheService.cache.get('CHAT_GROUP', cacheKey);
+      const cachedGroups = await cacheService.getUserChatGroups(userId);
       
-      console.log('chat groups from cache: ', JSON.stringify(groups, null, 2))
+      if (cachedGroups) {
+        console.log(
+          `✅ Cache HIT: Retrieved ${cachedGroups.length} chat groups for user ${userId}`,
+        );
+        return cachedGroups;
+      }
 
-      if (!groups) {
-        // Cache miss - fetch from database
-        const { data, error } = await supabase
-          .from("chat_group")
-          .select(`
+      console.log('chat groups fetching from db...')
+
+      // Cache miss - fetch from database
+      const { data, error } = await supabase
+        .from("chat_group")
+        .select(
+          `
             chat_group_id,
             dept_id,
             sys_user_id,
@@ -78,21 +87,21 @@ class ChatService {
                 prof_lastname
               )
             )
-          `)
-          .eq("status", "active")
-          .eq("sys_user_id", userId);
+          `,
+        )
+        .eq("status", "active")
+        .eq("sys_user_id", userId);
 
-        if (error) throw error;
-        
-        groups = data || [];
-        
-        // Cache for 5 minutes (chat groups change frequently)
-        await cacheService.cache.set('CHAT_GROUP', cacheKey, groups, 300);
-      }
-      
+      if (error) throw error;
+
+      const groups = data || [];
+
+      // Cache for 5 minutes (chat groups change frequently)
+      await cacheService.cacheUserChatGroups(userId, groups);
+
       return groups;
     } catch (error) {
-      console.error('❌ Error fetching chat groups:', error.message);
+      console.error("❌ Error fetching chat groups:", error.message);
       throw error;
     }
   }
@@ -102,15 +111,18 @@ class ChatService {
    */
   async getResolvedChatGroupsByUser(userId) {
     try {
-      // Cache key for resolved chats
-      const cacheKey = `user_resolved_chat_groups_${userId}`;
-      let groups = await cacheService.cache.get('CHAT_GROUP', cacheKey);
-      
-      if (!groups) {
-        // Cache miss - fetch from database
-        const { data, error } = await supabase
-          .from("chat_group")
-          .select(`
+      // Try to get from cache first
+      const cachedGroups = await cacheService.getResolvedUserChatGroups(userId);
+
+      if (cachedGroups) {
+        return cachedGroups;
+      }
+
+      // Cache miss - fetch from database
+      const { data, error } = await supabase
+        .from("chat_group")
+        .select(
+          `
             chat_group_id,
             dept_id,
             sys_user_id,
@@ -125,21 +137,21 @@ class ChatService {
                 prof_lastname
               )
             )
-          `)
-          .eq("status", "resolved")
-          .eq("sys_user_id", userId);
+          `,
+        )
+        .eq("status", "resolved")
+        .eq("sys_user_id", userId);
 
-        if (error) throw error;
-        
-        groups = data || [];
-        
-        // Cache for 5 minutes
-        await cacheService.cache.set('CHAT_GROUP', cacheKey, groups, 300);
-      }
-      
+      if (error) throw error;
+
+      const groups = data || [];
+
+      // Cache for 5 minutes
+      await cacheService.cacheResolvedUserChatGroups(userId, groups);
+
       return groups;
     } catch (error) {
-      console.error('❌ Error fetching resolved chat groups:', error.message);
+      console.error("❌ Error fetching resolved chat groups:", error.message);
       throw error;
     }
   }
@@ -162,7 +174,12 @@ class ChatService {
   /**
    * Get chat messages with pagination and sender information - Optimized with caching
    */
-  async getChatMessages(messageId, before = null, limit = 30, currentUserId = null) {
+  async getChatMessages(
+    messageId,
+    before = null,
+    limit = 30,
+    currentUserId = null,
+  ) {
     try {
       // Enforce limit bounds for performance
       const MAX_LIMIT = 100;
@@ -170,16 +187,16 @@ class ChatService {
 
       // messageId can be either a chat_group_id or client_id
       // First try to use it as chat_group_id, if that fails, treat as client_id
-      
+
       let chatGroupId = null;
-      
+
       // Check if messageId is a chat_group_id
       const { data: directChatGroup, error: directError } = await supabase
         .from("chat_group")
         .select("chat_group_id, client_id, status")
         .eq("chat_group_id", messageId)
         .single();
-      
+
       if (!directError && directChatGroup) {
         // messageId is a chat_group_id - use it directly
         chatGroupId = directChatGroup.chat_group_id;
@@ -200,30 +217,36 @@ class ChatService {
         }
 
         chatGroupId = activeGroup.chat_group_id;
-        console.log(`✅ Using client's most recent active chat group: ${chatGroupId}`);
+        console.log(
+          `✅ Using client's most recent active chat group: ${chatGroupId}`,
+        );
       }
-      
+
       // Try to get recent messages from cache first
       let cachedMessages = [];
       if (!before && safeLimit <= 50) {
         cachedMessages = await cacheService.getChatMessages(chatGroupId);
-        
+
         if (cachedMessages.length > 0) {
           // Sort and limit cached messages
-          cachedMessages.sort((a, b) => new Date(b.chat_created_at) - new Date(a.chat_created_at));
+          cachedMessages.sort(
+            (a, b) => new Date(b.chat_created_at) - new Date(a.chat_created_at),
+          );
           const limitedMessages = cachedMessages.slice(0, safeLimit);
-          
-          // Process cached messages
-          const processedMessages = limitedMessages.map((msg) => ({
-            ...msg,
-            sender_type: determineSenderType(msg, currentUserId),
-            sender_name: getSenderName(msg),
-            sender_image: getSenderImageOptimized(msg)
-          })).reverse();
 
-          return { 
+          // Process cached messages
+          const processedMessages = limitedMessages
+            .map((msg) => ({
+              ...msg,
+              sender_type: determineSenderType(msg, currentUserId),
+              sender_name: getSenderName(msg),
+              sender_image: getSenderImageOptimized(msg),
+            }))
+            .reverse();
+
+          return {
             messages: processedMessages,
-            totalCount: processedMessages.length
+            totalCount: processedMessages.length,
           };
         }
       }
@@ -231,7 +254,8 @@ class ChatService {
       // Cache miss or pagination - fetch from database
       let query = supabase
         .from("chat")
-        .select(`
+        .select(
+          `
           chat_id,
           chat_body,
           chat_created_at,
@@ -264,16 +288,17 @@ class ChatService {
               )
             )
           )
-        `)
+        `,
+        )
         .eq("chat_group_id", chatGroupId) // Only messages from this specific chat group
         .order("chat_created_at", { ascending: false })
         .limit(safeLimit);
-        
+
       if (before) {
         query = query.lt("chat_created_at", before);
       }
 
-      console.log(`fetching ${safeLimit} messages`)
+      console.log(`fetching ${safeLimit} messages`);
 
       const { data: rows, error: chatErr } = await query;
       if (chatErr) throw chatErr;
@@ -281,7 +306,8 @@ class ChatService {
       // Fetch transfer logs for this chat group
       const { data: transfers, error: transferErr } = await supabase
         .from("chat_transfer_log")
-        .select(`
+        .select(
+          `
           transfer_id,
           transferred_at,
           transfer_type,
@@ -291,7 +317,8 @@ class ChatService {
             sys_user_id,
             profile:profile(prof_firstname, prof_lastname)
           )
-        `)
+        `,
+        )
         .eq("chat_group_id", chatGroupId)
         .order("transferred_at", { ascending: false });
 
@@ -300,22 +327,22 @@ class ChatService {
       }
 
       // Convert transfers to message format
-      const transferMessages = (transfers || []).map(transfer => {
-        let transferText = '';
-        const toDept = transfer.to_dept?.dept_name || 'Unknown Department';
-        const toAgent = transfer.to_agent?.profile 
+      const transferMessages = (transfers || []).map((transfer) => {
+        let transferText = "";
+        const toDept = transfer.to_dept?.dept_name || "Unknown Department";
+        const toAgent = transfer.to_agent?.profile
           ? `${transfer.to_agent.profile.prof_firstname} ${transfer.to_agent.profile.prof_lastname}`.trim()
           : null;
 
         // Handle transfer_type (default to 'manual' if null for backward compatibility)
-        const transferType = transfer.transfer_type || 'manual';
+        const transferType = transfer.transfer_type || "manual";
 
-        if (transferType === 'manual') {
+        if (transferType === "manual") {
           transferText = `Chat transferred to ${toDept}`;
-        } else if (transferType === 'agent_offline') {
-          transferText = 'Chat reassigned (previous agent went offline)';
+        } else if (transferType === "agent_offline") {
+          transferText = "Chat reassigned (previous agent went offline)";
         } else {
-          transferText = 'Chat transferred';
+          transferText = "Chat transferred";
         }
 
         return {
@@ -323,26 +350,28 @@ class ChatService {
           chat_body: transferText,
           chat_created_at: transfer.transferred_at,
           chat_group_id: chatGroupId,
-          sender_type: 'system',
-          message_type: 'transfer',
+          sender_type: "system",
+          message_type: "transfer",
           transfer_data: {
             transfer_id: transfer.transfer_id,
             transfer_type: transferType,
             to_dept: toDept,
-            to_agent: toAgent
-          }
+            to_agent: toAgent,
+          },
         };
       });
 
       // Merge messages and transfers, then sort by timestamp
       const allMessages = [...(rows || []), ...transferMessages];
-      allMessages.sort((a, b) => new Date(a.chat_created_at) - new Date(b.chat_created_at));
+      allMessages.sort(
+        (a, b) => new Date(a.chat_created_at) - new Date(b.chat_created_at),
+      );
 
       // Apply pagination filter if needed
       let filteredMessages = allMessages;
       if (before) {
-        filteredMessages = allMessages.filter(msg => 
-          new Date(msg.chat_created_at) < new Date(before)
+        filteredMessages = allMessages.filter(
+          (msg) => new Date(msg.chat_created_at) < new Date(before),
         );
       }
 
@@ -351,14 +380,14 @@ class ChatService {
 
       // Process messages (skip transfer messages as they're already formatted)
       const messages = filteredMessages.map((msg) => {
-        if (msg.message_type === 'transfer') {
+        if (msg.message_type === "transfer") {
           return msg;
         }
         return {
           ...msg,
           sender_type: determineSenderType(msg, currentUserId),
           sender_name: getSenderName(msg),
-          sender_image: getSenderImageOptimized(msg)
+          sender_image: getSenderImageOptimized(msg),
         };
       });
 
@@ -367,12 +396,12 @@ class ChatService {
         await cacheService.cacheChatMessages(chatGroupId, messages);
       }
 
-      return { 
+      return {
         messages,
-        totalCount: messages.length
+        totalCount: messages.length,
       };
     } catch (error) {
-      console.error('❌ Error fetching chat messages:', error.message);
+      console.error("❌ Error fetching chat messages:", error.message);
       throw error;
     }
   }
@@ -388,23 +417,22 @@ class ChatService {
         .select("*");
 
       if (insertError) throw insertError;
-      
+
       const newMessage = data && data.length > 0 ? data[0] : null;
-      
+
       // Invalidate chat message cache for this group
       if (newMessage && newMessage.chat_group_id) {
         await cacheService.invalidateChatMessages(newMessage.chat_group_id);
-        
+
         // Also invalidate user's chat groups cache if they're assigned
-        if (newMessage.sys_user_id) {
-          const cacheKey = `user_chat_groups_${newMessage.sys_user_id}`;
-          await cacheService.cache.delete('CHAT_GROUP', cacheKey);
-        }
+        // if (newMessage.sys_user_id) {
+        //   await cacheService.invalidateUserChatGroups(newMessage.sys_user_id);
+        // }
       }
-      
+
       return newMessage;
     } catch (error) {
-      console.error('❌ Error inserting message:', error.message);
+      console.error("❌ Error inserting message:", error.message);
       throw error;
     }
   }
@@ -423,7 +451,9 @@ class ChatService {
         .single();
 
       if (fetchError || !chatGroup) {
-        throw new Error("Chat group not found or you don't have permission to transfer it");
+        throw new Error(
+          "Chat group not found or you don't have permission to transfer it",
+        );
       }
 
       const fromDeptId = chatGroup.dept_id;
@@ -439,7 +469,7 @@ class ChatService {
           from_dept_id: fromDeptId,
           to_dept_id: deptId,
           transfer_type: "manual",
-          transferred_at: new Date().toISOString()
+          transferred_at: new Date().toISOString(),
         })
         .select()
         .single();
@@ -454,7 +484,7 @@ class ChatService {
         .from("chat_group")
         .update({
           dept_id: deptId,
-          sys_user_id: null
+          sys_user_id: null,
         })
         .eq("chat_group_id", chatGroupId);
 
@@ -463,27 +493,38 @@ class ChatService {
       // Use round-robin to auto-assign to an available agent in the new department
       const assignmentResult = await agentAssignmentService.autoAssignChatGroup(
         chatGroupId,
-        deptId
+        deptId,
       );
 
       console.log(
         `✅ Chat ${chatGroupId} transferred from dept ${fromDeptId} to ${deptId}:`,
-        assignmentResult.assigned ? `assigned to agent ${assignmentResult.agentId}` : "queued (no available agents)"
+        assignmentResult.assigned
+          ? `assigned to agent ${assignmentResult.agentId}`
+          : "queued (no available agents)",
       );
 
       // If agent was found, UPDATE the transfer log with to_agent_id
-      if (assignmentResult.assigned && assignmentResult.agentId && transferLog) {
+      if (
+        assignmentResult.assigned &&
+        assignmentResult.agentId &&
+        transferLog
+      ) {
         const { error: updateLogError } = await supabase
           .from("chat_transfer_log")
           .update({
-            to_agent_id: assignmentResult.agentId
+            to_agent_id: assignmentResult.agentId,
           })
           .eq("transfer_id", transferLog.transfer_id);
 
         if (updateLogError) {
-          console.error("⚠️ Failed to update transfer log with to_agent_id:", updateLogError.message);
+          console.error(
+            "⚠️ Failed to update transfer log with to_agent_id:",
+            updateLogError.message,
+          );
         } else {
-          console.log(`✅ Updated transfer log ${transferLog.transfer_id} with to_agent_id: ${assignmentResult.agentId}`);
+          console.log(
+            `✅ Updated transfer log ${transferLog.transfer_id} with to_agent_id: ${assignmentResult.agentId}`,
+          );
         }
       }
 
@@ -496,26 +537,22 @@ class ChatService {
 
       if (finalError) throw finalError;
 
-      // Invalidate related caches
-      await cacheService.invalidateChatGroup(chatGroupId);
       await cacheService.invalidateChatMessages(chatGroupId);
-      
+
       // Invalidate both old and new agent's chat groups cache
-      const oldAgentCacheKey = `user_chat_groups_${userId}`;
-      await cacheService.cache.delete('CHAT_GROUP', oldAgentCacheKey);
-      
+      await cacheService.invalidateUserChatGroups(userId);
+
       if (assignmentResult.assigned && assignmentResult.agentId) {
-        const newAgentCacheKey = `user_chat_groups_${assignmentResult.agentId}`;
-        await cacheService.cache.delete('CHAT_GROUP', newAgentCacheKey);
+        await cacheService.invalidateUserChatGroups(assignmentResult.agentId);
       }
 
       return {
         ...updatedChat,
         from_dept_id: fromDeptId,
-        assignmentResult
+        assignmentResult,
       };
     } catch (error) {
-      console.error('❌ Error transferring chat group:', error.message);
+      console.error("❌ Error transferring chat group:", error.message);
       throw error;
     }
   }
@@ -530,7 +567,7 @@ class ChatService {
         .from("chat_group")
         .update({
           status: "resolved",
-          resolved_at: new Date().toISOString()
+          resolved_at: new Date().toISOString(),
         })
         .eq("chat_group_id", chatGroupId)
         .eq("sys_user_id", userId) // Ensure only the assigned user can resolve
@@ -538,9 +575,11 @@ class ChatService {
         .single();
 
       if (chatError) throw chatError;
-      
+
       if (!chatGroup) {
-        throw new Error("Chat group not found or you don't have permission to resolve it");
+        throw new Error(
+          "Chat group not found or you don't have permission to resolve it",
+        );
       }
 
       // If feedback data is provided, store it
@@ -554,16 +593,16 @@ class ChatService {
             rating: feedbackData.rating || null,
             feedback_text: feedbackData.feedback || null,
             chat_duration_seconds: feedbackData.chatDurationSeconds || null,
-            message_count: feedbackData.messageCount || null
+            message_count: feedbackData.messageCount || null,
           })
           .select()
           .single();
 
         if (feedbackError) {
-          console.warn('⚠️ Failed to save feedback:', feedbackError.message);
+          console.warn("⚠️ Failed to save feedback:", feedbackError.message);
         } else {
           feedbackRecord = feedback;
-          
+
           // Update chat group with feedback reference
           await supabase
             .from("chat_group")
@@ -572,24 +611,18 @@ class ChatService {
         }
       }
 
-      // Invalidate related caches
-      await cacheService.invalidateChatGroup(chatGroupId);
       await cacheService.invalidateChatMessages(chatGroupId);
-      
-      // Invalidate user's active chat groups cache
-      const userCacheKey = `user_chat_groups_${userId}`;
-      await cacheService.cache.delete('CHAT_GROUP', userCacheKey);
-      
-      // Invalidate user's resolved chat groups cache
-      const resolvedCacheKey = `user_resolved_chat_groups_${userId}`;
-      await cacheService.cache.delete('CHAT_GROUP', resolvedCacheKey);
+
+      // Invalidate user's active and resolved chat groups cache
+      await cacheService.invalidateUserChatGroups(userId);
+      await cacheService.invalidateResolvedUserChatGroups(userId);
 
       return {
         ...chatGroup,
-        feedback: feedbackRecord
+        feedback: feedbackRecord,
       };
     } catch (error) {
-      console.error('❌ Error resolving chat group:', error.message);
+      console.error("❌ Error resolving chat group:", error.message);
       throw error;
     }
   }
@@ -600,26 +633,35 @@ class ChatService {
    */
   async getTransferDetails(fromDeptId, toDeptId, assignmentResult) {
     const [fromDeptResult, toDeptResult] = await Promise.all([
-      supabase.from('department').select('dept_name').eq('dept_id', fromDeptId || 0).single(),
-      supabase.from('department').select('dept_name').eq('dept_id', toDeptId).single(),
+      supabase
+        .from("department")
+        .select("dept_name")
+        .eq("dept_id", fromDeptId || 0)
+        .single(),
+      supabase
+        .from("department")
+        .select("dept_name")
+        .eq("dept_id", toDeptId)
+        .single(),
     ]);
 
     let toAgentName = null;
     if (assignmentResult.assigned && assignmentResult.agentId) {
       const { data: agentData } = await supabase
-        .from('sys_user')
-        .select('prof_id, profile:profile(prof_firstname, prof_lastname)')
-        .eq('sys_user_id', assignmentResult.agentId)
+        .from("sys_user")
+        .select("prof_id, profile:profile(prof_firstname, prof_lastname)")
+        .eq("sys_user_id", assignmentResult.agentId)
         .single();
 
       if (agentData?.profile) {
-        toAgentName = `${agentData.profile.prof_firstname} ${agentData.profile.prof_lastname}`.trim();
+        toAgentName =
+          `${agentData.profile.prof_firstname} ${agentData.profile.prof_lastname}`.trim();
       }
     }
 
     return {
-      fromDeptName: fromDeptResult.data?.dept_name || 'Unknown',
-      toDeptName: toDeptResult.data?.dept_name || 'Unknown',
+      fromDeptName: fromDeptResult.data?.dept_name || "Unknown",
+      toDeptName: toDeptResult.data?.dept_name || "Unknown",
       toAgentName,
     };
   }
@@ -629,14 +671,13 @@ class ChatService {
    */
   async clearUserCache(userId) {
     try {
-      await cacheService.invalidateUserProfile(userId, 'agent');
-      
-      const userCacheKey = `user_chat_groups_${userId}`;
-      await cacheService.cache.delete('CHAT_GROUP', userCacheKey);
-      
+      await cacheService.invalidateUserProfile(userId, "agent");
+      await cacheService.invalidateUserChatGroups(userId);
+      await cacheService.invalidateResolvedUserChatGroups(userId);
+
       console.log(`🧹 Cleared cache for user ${userId}`);
     } catch (error) {
-      console.error('❌ Error clearing user cache:', error.message);
+      console.error("❌ Error clearing user cache:", error.message);
     }
   }
 }

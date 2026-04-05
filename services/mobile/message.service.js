@@ -1,5 +1,6 @@
 const supabase = require("../../helpers/supabaseClient");
 const agentAssignmentService = require("../agentAssignment.service");
+const cacheService = require("../cache.service");
 
 class MobileMessageService {
   /**
@@ -31,14 +32,20 @@ class MobileMessageService {
    * @param {number} currentClientId - Current client ID for sender type detection (optional)
    * @returns {Promise<Object>} Object containing messages array and pagination info
    */
-  async getMessagesByGroupId(chatGroupId, before = null, limit = 30, currentClientId = null) {
+  async getMessagesByGroupId(
+    chatGroupId,
+    before = null,
+    limit = 30,
+    currentClientId = null,
+  ) {
     // Enforce limit bounds for performance
     const MAX_LIMIT = 100;
     const safeLimit = Math.min(parseInt(limit, 10), MAX_LIMIT);
 
     let query = supabase
       .from("chat")
-      .select(`
+      .select(
+        `
         chat_id,
         chat_body,
         chat_created_at,
@@ -71,7 +78,8 @@ class MobileMessageService {
             )
           )
         )
-      `)
+      `,
+      )
       .eq("chat_group_id", chatGroupId)
       .order("chat_created_at", { ascending: false }) // Get newest first for pagination
       .limit(safeLimit);
@@ -88,7 +96,8 @@ class MobileMessageService {
     // Fetch transfer logs for this chat group
     const { data: transfers, error: transferErr } = await supabase
       .from("chat_transfer_log")
-      .select(`
+      .select(
+        `
         transfer_id,
         transferred_at,
         transfer_type,
@@ -98,7 +107,8 @@ class MobileMessageService {
           sys_user_id,
           profile:profile(prof_firstname, prof_lastname)
         )
-      `)
+      `,
+      )
       .eq("chat_group_id", chatGroupId)
       .order("transferred_at", { ascending: false });
 
@@ -107,22 +117,22 @@ class MobileMessageService {
     }
 
     // Convert transfers to message format
-    const transferMessages = (transfers || []).map(transfer => {
-      let transferText = '';
-      const toDept = transfer.to_dept?.dept_name || 'Unknown Department';
-      const toAgent = transfer.to_agent?.profile 
+    const transferMessages = (transfers || []).map((transfer) => {
+      let transferText = "";
+      const toDept = transfer.to_dept?.dept_name || "Unknown Department";
+      const toAgent = transfer.to_agent?.profile
         ? `${transfer.to_agent.profile.prof_firstname} ${transfer.to_agent.profile.prof_lastname}`.trim()
         : null;
 
       // Handle transfer_type (default to 'manual' if null for backward compatibility)
-      const transferType = transfer.transfer_type || 'manual';
+      const transferType = transfer.transfer_type || "manual";
 
-      if (transferType === 'manual') {
+      if (transferType === "manual") {
         transferText = `Chat transferred to ${toDept}`;
-      } else if (transferType === 'agent_offline') {
-        transferText = 'Chat reassigned (previous agent went offline)';
+      } else if (transferType === "agent_offline") {
+        transferText = "Chat reassigned (previous agent went offline)";
       } else {
-        transferText = 'Chat transferred';
+        transferText = "Chat transferred";
       }
 
       return {
@@ -130,26 +140,28 @@ class MobileMessageService {
         chat_body: transferText,
         chat_created_at: transfer.transferred_at,
         chat_group_id: chatGroupId,
-        sender_type: 'system',
-        message_type: 'transfer',
+        sender_type: "system",
+        message_type: "transfer",
         transfer_data: {
           transfer_id: transfer.transfer_id,
           transfer_type: transferType,
           to_dept: toDept,
-          to_agent: toAgent
-        }
+          to_agent: toAgent,
+        },
       };
     });
 
     // Merge messages and transfers, then sort by timestamp (ascending - oldest first)
     const allMessages = [...(rows || []), ...transferMessages];
-    allMessages.sort((a, b) => new Date(a.chat_created_at) - new Date(b.chat_created_at));
+    allMessages.sort(
+      (a, b) => new Date(a.chat_created_at) - new Date(b.chat_created_at),
+    );
 
     // Apply pagination filter if needed
     let filteredMessages = allMessages;
     if (before) {
-      filteredMessages = allMessages.filter(msg => 
-        new Date(msg.chat_created_at) < new Date(before)
+      filteredMessages = allMessages.filter(
+        (msg) => new Date(msg.chat_created_at) < new Date(before),
       );
     }
 
@@ -158,14 +170,14 @@ class MobileMessageService {
 
     // Process messages (skip transfer messages as they're already formatted)
     const messages = filteredMessages.map((msg) => {
-      if (msg.message_type === 'transfer') {
+      if (msg.message_type === "transfer") {
         return msg;
       }
       return {
         ...msg,
         sender_type: this.determineSenderType(msg, currentClientId),
         sender_name: this.getSenderName(msg),
-        sender_image: this.getSenderImageOptimized(msg)
+        sender_image: this.getSenderImageOptimized(msg),
       };
     });
 
@@ -176,7 +188,10 @@ class MobileMessageService {
       hasMore: rows.length === safeLimit, // If we got the full limit, there might be more
       count: messages.length,
       oldestTimestamp: messages.length > 0 ? messages[0].chat_created_at : null,
-      newestTimestamp: messages.length > 0 ? messages[messages.length - 1].chat_created_at : null
+      newestTimestamp:
+        messages.length > 0
+          ? messages[messages.length - 1].chat_created_at
+          : null,
     };
   }
 
@@ -187,14 +202,14 @@ class MobileMessageService {
     if (message.client_id && !message.sys_user_id) {
       // Message from client
       if (currentClientId && message.client_id === currentClientId) {
-        return 'current_client'; // Current client's message
+        return "current_client"; // Current client's message
       }
-      return 'client';
+      return "client";
     } else if (message.sys_user_id) {
       // Message from agent
-      return 'agent';
+      return "agent";
     }
-    return 'system';
+    return "system";
   }
 
   /**
@@ -203,32 +218,36 @@ class MobileMessageService {
   getSenderName(message) {
     if (message.client_id && !message.sys_user_id) {
       if (message.client?.profile) {
-        const firstName = message.client.profile.prof_firstname || '';
-        const lastName = message.client.profile.prof_lastname || '';
-        return `${firstName} ${lastName}`.trim() || 'Client';
+        const firstName = message.client.profile.prof_firstname || "";
+        const lastName = message.client.profile.prof_lastname || "";
+        return `${firstName} ${lastName}`.trim() || "Client";
       }
-      return 'Client';
+      return "Client";
     } else if (message.sys_user_id && message.sys_user?.profile) {
-      const firstName = message.sys_user.profile.prof_firstname || '';
-      const lastName = message.sys_user.profile.prof_lastname || '';
-      return `${firstName} ${lastName}`.trim() || 'Agent';
+      const firstName = message.sys_user.profile.prof_firstname || "";
+      const lastName = message.sys_user.profile.prof_lastname || "";
+      return `${firstName} ${lastName}`.trim() || "Agent";
     } else if (message.sys_user_id) {
-      return 'Agent';
+      return "Agent";
     }
-    return 'System';
+    return "System";
   }
 
   /**
    * Get sender profile image using joined data
    */
   getSenderImageOptimized(message) {
-    if (message.client_id && !message.sys_user_id && message.client?.profile?.image) {
+    if (
+      message.client_id &&
+      !message.sys_user_id &&
+      message.client?.profile?.image
+    ) {
       const images = message.client.profile.image || [];
-      const currentImage = images.find(img => img.img_is_current);
+      const currentImage = images.find((img) => img.img_is_current);
       return currentImage?.img_location || null;
     } else if (message.sys_user_id && message.sys_user?.profile?.image) {
       const images = message.sys_user.profile.image || [];
-      const currentImage = images.find(img => img.img_is_current);
+      const currentImage = images.find((img) => img.img_is_current);
       return currentImage?.img_location || null;
     }
     return null;
@@ -279,7 +298,7 @@ class MobileMessageService {
     try {
       const assignmentResult = await agentAssignmentService.autoAssignChatGroup(
         chatGroupId,
-        department
+        department,
       );
 
       return {
@@ -287,7 +306,7 @@ class MobileMessageService {
         assigned: assignmentResult.assigned,
         status: assignmentResult.status,
         agent_id: assignmentResult.agentId || null,
-        department
+        department,
       };
     } catch (assignError) {
       console.error("❌ Error auto-assigning chat group:", assignError.message);
@@ -297,7 +316,7 @@ class MobileMessageService {
         assigned: false,
         status: "queued",
         agent_id: null,
-        department
+        department,
       };
     }
   }
@@ -310,7 +329,7 @@ class MobileMessageService {
       // First verify the chat group belongs to this client
       const { data: chatGroup, error: verifyError } = await supabase
         .from("chat_group")
-        .select("chat_group_id, client_id, status")
+        .select("chat_group_id, client_id, status, sys_user_id")
         .eq("chat_group_id", chatGroupId)
         .eq("client_id", clientId)
         .single();
@@ -328,7 +347,7 @@ class MobileMessageService {
         .from("chat_group")
         .update({
           status: "resolved",
-          resolved_at: new Date().toISOString()
+          resolved_at: new Date().toISOString(),
         })
         .eq("chat_group_id", chatGroupId)
         .select()
@@ -336,14 +355,25 @@ class MobileMessageService {
 
       if (updateError) throw updateError;
 
+      // Invalidate agent's chat groups cache if chat was assigned
+      if (chatGroup.sys_user_id) {
+        await cacheService.invalidateUserChatGroups(chatGroup.sys_user_id);
+        await cacheService.invalidateResolvedUserChatGroups(
+          chatGroup.sys_user_id,
+        );
+      }
+
+      // Invalidate chat messages cache
+      await cacheService.invalidateChatMessages(chatGroupId);
+
       // Store feedback if provided
       let feedbackRecord = null;
       if (feedbackData.rating || feedbackData.feedback) {
-        console.log('💾 Storing feedback:', {
+        console.log("💾 Storing feedback:", {
           rating: feedbackData.rating,
-          feedback: feedbackData.feedback ? 'provided' : 'none',
+          feedback: feedbackData.feedback ? "provided" : "none",
           duration: feedbackData.chatDurationSeconds,
-          messageCount: feedbackData.messageCount
+          messageCount: feedbackData.messageCount,
         });
 
         const { data: feedback, error: feedbackError } = await supabase
@@ -353,26 +383,16 @@ class MobileMessageService {
             client_id: clientId,
             rating: feedbackData.rating || null,
             feedback_text: feedbackData.feedback || null,
-            chat_duration_seconds: feedbackData.chatDurationSeconds || null,
-            message_count: feedbackData.messageCount || null
           })
           .select()
           .single();
 
         if (feedbackError) {
-          console.warn('⚠️ Failed to save feedback:', feedbackError.message);
-          console.warn('⚠️ Feedback data that failed:', {
-            chat_group_id: chatGroupId,
-            client_id: clientId,
-            rating: feedbackData.rating,
-            feedback_text: feedbackData.feedback,
-            chat_duration_seconds: feedbackData.chatDurationSeconds,
-            message_count: feedbackData.messageCount
-          });
+          console.warn("⚠️ Failed to save feedback:", feedbackError.message);
         } else {
           feedbackRecord = feedback;
-          console.log('✅ Feedback saved successfully:', feedback);
-          
+          console.log("✅ Feedback saved successfully:", feedback);
+
           // Update chat group with feedback reference
           const { error: updateError } = await supabase
             .from("chat_group")
@@ -380,21 +400,24 @@ class MobileMessageService {
             .eq("chat_group_id", chatGroupId);
 
           if (updateError) {
-            console.warn('⚠️ Failed to link feedback to chat group:', updateError.message);
+            console.warn(
+              "⚠️ Failed to link feedback to chat group:",
+              updateError.message,
+            );
           }
         }
       } else {
-        console.log('ℹ️ No feedback provided by client');
+        console.log("ℹ️ No feedback provided by client");
       }
 
       return {
         chat_group_id: updatedGroup.chat_group_id,
         status: updatedGroup.status,
         resolved_at: updatedGroup.resolved_at,
-        feedback: feedbackRecord
+        feedback: feedbackRecord,
       };
     } catch (error) {
-      console.error('❌ Error ending chat group:', error.message);
+      console.error("❌ Error ending chat group:", error.message);
       throw error;
     }
   }
@@ -406,12 +429,14 @@ class MobileMessageService {
     try {
       const { data: resolvedChats, error } = await supabase
         .from("chat_group")
-        .select(`
+        .select(
+          `
           chat_group_id,
           resolved_at,
           created_at,
           department:department(dept_name)
-        `)
+        `,
+        )
         .eq("client_id", clientId)
         .eq("status", "resolved")
         .order("resolved_at", { ascending: false });
@@ -419,9 +444,9 @@ class MobileMessageService {
       if (error) throw error;
 
       // Format the response
-      const formattedChats = resolvedChats.map(chat => ({
+      const formattedChats = resolvedChats.map((chat) => ({
         chat_group_id: chat.chat_group_id,
-        department: chat.department?.dept_name || 'Unknown Department',
+        department: chat.department?.dept_name || "Unknown Department",
         resolved_at: chat.resolved_at,
         created_at: chat.created_at,
         rating: chat.chat_feedback?.rating || null,
@@ -432,7 +457,7 @@ class MobileMessageService {
 
       return formattedChats;
     } catch (error) {
-      console.error('❌ Error fetching resolved chats:', error.message);
+      console.error("❌ Error fetching resolved chats:", error.message);
       throw error;
     }
   }
