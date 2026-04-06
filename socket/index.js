@@ -175,9 +175,10 @@ function initializeSocket(server, allowedOrigins) {
           const previousRoom = `chat_${socket.currentChatGroup}`;
           socket.leave(previousRoom);
           
-          // Log room leave
+          // Log room leave with stats
           const previousRoomSize = io.sockets.adapter.rooms.get(previousRoom)?.size || 0;
-          console.log(`🚪 ${socket.user.userType} ${socket.user.userId} left room: ${previousRoom} (${previousRoomSize} users remaining)`);
+          const totalRooms = io.sockets.adapter.rooms.size;
+          console.log(`🚪 ${socket.user.userType} ${socket.user.userId} left room: ${previousRoom} | Users in room: ${previousRoomSize} | Total rooms: ${totalRooms}`);
           
           handleUserLeft(
             io,
@@ -202,7 +203,11 @@ function initializeSocket(server, allowedOrigins) {
           chatGroupId,
         );
 
-        console.log(`📱 ${socket.user.userType} ${socket.user.userId} joining chat group ${chatGroupId}`);
+        // Log room join with stats
+        const currentRoomSize = io.sockets.adapter.rooms.get(`chat_${chatGroupId}`)?.size || 0;
+        const totalRooms = io.sockets.adapter.rooms.size;
+        const totalConnections = io.sockets.sockets.size;
+        console.log(`📱 ${socket.user.userType} ${socket.user.userId} joined room: chat_${chatGroupId} | Users in room: ${currentRoomSize} | Total rooms: ${totalRooms} | Total connections: ${totalConnections}`);
       } catch (error) {
         console.error("❌ Error joining chat group:", error);
         socket.emit("error", {
@@ -340,14 +345,61 @@ function initializeSocket(server, allowedOrigins) {
             // Emit only to the assigned agent
             const agentRoom = `agent_${chatGroupInfo.sys_user_id}`;
             io.to(agentRoom).emit('customerListUpdate', moveToTopPayload);
-
-            console.log(`📋 customerListUpdate: move_to_top for chat ${chat_group_id} to agent ${chatGroupInfo.sys_user_id}`);
           }
         }
 
       } catch (error) {
         console.error("❌ Error sending message:", error);
         socket.emit("messageError", { message: "Failed to send message" });
+      }
+    });
+
+    // Leave chat room
+    socket.on("chat:leave", async ({ chatGroupId }) => {
+      try {
+        if (!chatGroupId) {
+          socket.emit("error", { message: "Chat group ID is required" });
+          return;
+        }
+
+        const roomName = `chat_${chatGroupId}`;
+        
+        // Check if user is actually in this room
+        // if (socket.currentChatGroup !== chatGroupId) {
+        //   socket.emit("error", { message: "You are not in this chat room" });
+        //   return;
+        // }
+
+        // Leave the room
+        socket.leave(roomName);
+        
+        // Log room leave with stats
+        const roomSize = io.sockets.adapter.rooms.get(roomName)?.size || 0;
+        const totalRooms = io.sockets.adapter.rooms.size;
+        const totalConnections = io.sockets.sockets.size;
+        console.log(`🚪 ${socket.user.userType} ${socket.user.userId} left room: ${roomName} | Users in room: ${roomSize} | Total rooms: ${totalRooms} | Total connections: ${totalConnections}`);
+        
+        // Notify others in the room
+        handleUserLeft(
+          io,
+          socket,
+          roomName,
+          socket.user.userType,
+          socket.user.userId,
+          chatGroupId,
+        );
+
+        // Clear current chat group
+        socket.currentChatGroup = null;
+
+        // Confirm to the user
+        socket.emit("chat:left", { chatGroupId });
+
+      } catch (error) {
+        console.error("❌ Error leaving chat group:", error);
+        socket.emit("error", {
+          message: "Failed to leave chat group: " + error.message,
+        });
       }
     });
 

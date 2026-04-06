@@ -5,6 +5,7 @@ const cacheService = require("../cache.service");
 class MobileMessageService {
   /**
    * Create a new message
+   * Invalidates cache for the chat group
    */
   async createMessage(chatBody, clientId, chatGroupId) {
     const { data, error } = await supabase
@@ -20,12 +21,21 @@ class MobileMessageService {
       .single();
 
     if (error) throw error;
+
+    // Invalidate cache for this chat group (all limit variations)
+    await cacheService.invalidateChatMessages(chatGroupId);
+    // Also invalidate with common limit patterns
+    await cacheService.invalidateChatMessages(`${chatGroupId}_30`);
+    await cacheService.invalidateChatMessages(`${chatGroupId}_50`);
+    await cacheService.invalidateChatMessages(`${chatGroupId}_100`);
+
     return data;
   }
 
   /**
    * Get messages by chat group ID with pagination
    * Includes transfer logs and sender type detection (matches web implementation)
+   * Uses caching with pagination support
    * @param {number} chatGroupId - The chat group ID
    * @param {string} before - ISO timestamp for pagination (optional)
    * @param {number} limit - Number of messages to fetch (default: 30, max: 100)
@@ -41,6 +51,21 @@ class MobileMessageService {
     // Enforce limit bounds for performance
     const MAX_LIMIT = 100;
     const safeLimit = Math.min(parseInt(limit, 10), MAX_LIMIT);
+
+    // Create cache key with pagination parameters
+    // Only cache the first page (no 'before' parameter) to keep cache simple
+    const shouldCache = !before;
+    const cacheKey = `${chatGroupId}_${safeLimit}`;
+
+    // Try to get from cache (only for first page)
+    if (shouldCache) {
+      const cachedData = await cacheService.getChatMessages(cacheKey);
+      if (cachedData && cachedData.messages && cachedData.messages.length > 0) {
+        console.log(`✅ Cache hit for chat messages: ${cacheKey}`);
+        return cachedData;
+      }
+      console.log(`⚠️ Cache miss for chat messages: ${cacheKey}`);
+    }
 
     let query = supabase
       .from("chat")
@@ -183,7 +208,7 @@ class MobileMessageService {
 
     // Messages are already in ascending order (oldest first) for UI display
 
-    return {
+    const result = {
       messages: messages,
       hasMore: rows.length === safeLimit, // If we got the full limit, there might be more
       count: messages.length,
@@ -193,6 +218,14 @@ class MobileMessageService {
           ? messages[messages.length - 1].chat_created_at
           : null,
     };
+
+    // Cache the result (only for first page) with 2-minute TTL
+    if (shouldCache && messages.length > 0) {
+      await cacheService.cacheChatMessages(cacheKey, result.messages, safeLimit);
+      console.log(`💾 Cached chat messages: ${cacheKey} (${messages.length} messages)`);
+    }
+
+    return result;
   }
 
   /**

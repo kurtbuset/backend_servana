@@ -82,7 +82,6 @@ async function startServer() {
     const cache = await cacheManager.connect();
     if (cache) {
       app.set('cache', cache);
-      console.log('🗄️ Cache Manager initialized');
 
       // Start cleanup job every 5 minutes
       cacheCleanupInterval = setInterval(() => {
@@ -123,8 +122,6 @@ async function startServer() {
     // Start the server on all network interfaces (0.0.0.0)
     server.listen(port, '0.0.0.0', () => {
       console.log(`🚀 Server running on port ${port}`);
-      console.log(`🌐 Server accessible at:`);
-      console.log(`   - http://localhost:${port}`);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);

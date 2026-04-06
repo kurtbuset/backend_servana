@@ -1,39 +1,43 @@
 const axios = require('axios');
 
-const SMS_TO_API_URL = 'https://api.sms.to/sms/send';
+const SEMAPHORE_API_URL = 'https://api.semaphore.co/api/v4/messages';
 
 class SmsService {
   /**
-   * Send SMS via sms.to
+   * Send SMS via Semaphore
    * @param {string} phoneNumber - Full phone number with country code (e.g., +639171234567)
    * @param {string} message - SMS message content
-   * @returns {Promise<Object>} Response from sms.to API
+   * @returns {Promise<Object>} Response from Semaphore API
    */
   async sendSms(phoneNumber, message) {
-    const apiKey = process.env.SMS_TO_API_KEY;
-    const senderId = process.env.SMS_TO_SENDER_ID;
+    const apiKey = process.env.SEMAPHORE_API_KEY;
+    const senderId = process.env.SEMAPHORE_SENDER_NAME;
 
     if (!apiKey) {
-      throw new Error('SMS_TO_API_KEY is not configured');
+      throw new Error('SEMAPHORE_API_KEY is not configured');
     }
 
     try {
+      // Semaphore expects phone number without + prefix
+      const cleanPhoneNumber = phoneNumber.replace(/^\+/, '');
+
       const payload = {
+        apikey: apiKey,
+        number: cleanPhoneNumber,
         message: message,
-        to: phoneNumber,
       };
 
-      // Only include sender_id if it's configured and valid (alphanumeric and spaces only)
-      if (senderId && /^[a-zA-Z0-9\s]+$/.test(senderId)) {
-        payload.sender_id = senderId;
+      // Only include sendername if it's configured
+      // Note: Sender name must be registered in Semaphore dashboard first
+      if (senderId) {
+        payload.sendername = senderId;
       }
 
       const response = await axios.post(
-        SMS_TO_API_URL,
+        SEMAPHORE_API_URL,
         payload,
         {
           headers: {
-            'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
           },
         }

@@ -70,8 +70,6 @@ class MobileMessageController {
       const requestedLimit = parseInt(limit) || DEFAULT_LIMIT;
       const safeLimit = Math.max(MIN_LIMIT, Math.min(requestedLimit, MAX_LIMIT));
 
-      console.log('📱 Mobile message request:', { chatGroupId: id, before, limit: safeLimit, clientId });
-
       const result = await mobileMessageService.getMessagesByGroupId(id, before, safeLimit, clientId);
 
       // Add pagination metadata for better client-side handling

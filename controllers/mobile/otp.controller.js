@@ -58,22 +58,16 @@ class OtpController {
       );
 
       // Send OTP via SMS
-      // if (process.env.SMS_TO_API_KEY) {
-      //   try {
-      //     await smsService.sendOtpSms(phone_country_code, phone_number, result.otp);
-      //   } catch (smsError) {
-      //     console.error('Failed to send SMS:', smsError.message);
-          
-      //     // If it's a balance issue, log OTP to console for development
-      //     if (smsError.message?.includes('SMS_BALANCE_REQUIRED')) {
-      //       console.log(`⚠️  SMS.to requires account top-up. Development OTP for ${phone_country_code}${phone_number}: ${result.otp}`);
-      //     }
-      //     // Continue even if SMS fails - OTP is still stored
-      //   }
-      // } else {
-      //   // Development mode - log OTP to console
-      //   console.log(`🔐 OTP for ${phone_country_code}${phone_number}: ${result.otp}`);
-      // }
+      if (process.env.SEMAPHORE_API_KEY) {
+        try {
+          await smsService.sendOtpSms(phone_country_code, phone_number, result.otp);
+        } catch (smsError) {
+          console.error('Failed to send SMS:', smsError.message);
+        }
+      } else {
+        // Development mode - log OTP to console
+        console.log(`🔐 Development OTP for ${phone_country_code}${phone_number}: ${result.otp}`);
+      }
 
       res.json({ data: {  
         message: "OTP sent successfully",
