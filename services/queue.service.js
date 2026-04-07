@@ -1,5 +1,8 @@
 const supabase = require("../helpers/supabaseClient");
 const cacheService = require("./cache.service");
+const agentAssignmentService = require("./agentAssignment.service");
+const { CHAT_STATUS } = require("../constants/statuses");
+const { getProfileImages, getLatestMessageTimes, determineSenderType, getSenderName, getSenderImageOptimized } = require("../utils/messageHelpers");
 
 class QueueService {
   constructor() {
@@ -36,7 +39,7 @@ class QueueService {
             )
           )
         `)
-        .or(`and(status.eq.queued,sys_user_id.is.null),and(status.eq.transferred,sys_user_id.is.null)`)
+        .or(`status.eq.queued,and(status.eq.queued,sys_user_id.is.null)`)
         .in("dept_id", userDeptIds)
         .not("client_id", "is", null); // Only groups with clients
 
@@ -44,63 +47,11 @@ class QueueService {
       return groups || [];
     } catch (error) {
       console.error('❌ Error fetching unassigned chat groups:', error.message);
-      return [];
+      throw error;
     }
   }
 
-  async getProfileImages(profIds) {
-    if (!profIds || profIds.length === 0) return {};
-
-    // Single query with proper ordering to get current images first, then latest
-    const { data: images, error } = await supabase
-      .from("image")
-      .select("prof_id, img_location, img_is_current, img_created_at")
-      .in("prof_id", profIds)
-      .order("prof_id, img_is_current, img_created_at");
-
-    if (error) throw error;
-
-    const imageMap = {};
-    const processedProfiles = new Set();
-
-    // Process images - first occurrence per profile will be the best match
-    (images || []).forEach((img) => {
-      if (!processedProfiles.has(img.prof_id)) {
-        imageMap[img.prof_id] = img.img_location;
-        processedProfiles.add(img.prof_id);
-      }
-    });
-
-    return imageMap;
-  }
-
-  async getLatestMessageTimes(chatGroupIds) {
-    if (!chatGroupIds || chatGroupIds.length === 0) return {};
-
-    // Optimized query to get latest message per group, sorted by newest first
-    const { data: messages, error } = await supabase
-      .from("chat")
-      .select("chat_group_id, chat_created_at")
-      .in("chat_group_id", chatGroupIds)
-      .not("client_id", "is", null) // Only get messages from clients
-      .order("chat_created_at", { ascending: false }); // Sort by newest first
-
-    if (error) throw error;
-
-    // Create a map of chat_group_id to latest message time
-    const timeMap = {};
-    const processedGroups = new Set();
-
-    // Process messages - first occurrence per group will be the latest due to sorting
-    (messages || []).forEach((msg) => {
-      if (!processedGroups.has(msg.chat_group_id)) {
-        timeMap[msg.chat_group_id] = msg.chat_created_at;
-        processedGroups.add(msg.chat_group_id);
-      }
-    });
-
-    return timeMap;
-  }
+  // getProfileImages and getLatestMessageTimes moved to utils/messageHelpers.js
 
   /**
    * Get cached user departments using Redis
@@ -146,45 +97,15 @@ class QueueService {
   }
 
   /**
-   * Assign chat group to user
-   */
-  async assignChatGroupToUser(chatGroupId, userId) {
-    const { error } = await supabase
-      .from("chat_group")
-      .update({ sys_user_id: userId })
-      .eq("chat_group_id", chatGroupId)
-      .is("sys_user_id", null); // avoid overwriting if already set
-
-    if (error) throw error;
-  }
-
-  /**
-   * Accept chat - assign to user and set status to active
+   * Accept chat from queue - delegates core assignment to agentAssignmentService
    */
   async acceptChat(chatGroupId, userId) {
     try {
-      const { data, error } = await supabase
-        .from("chat_group")
-        .update({ 
-          sys_user_id: userId,
-          status: "active"
-        })
-        .eq("chat_group_id", chatGroupId)
-        .in("status", ["queued", "transferred"]) // Accept both queued and transferred chats
-        .is("sys_user_id", null)
-        .select()
-        .single();
+      const data = await agentAssignmentService.assignChatGroupToAgent(
+        chatGroupId, userId, { requiredStatus: CHAT_STATUS.QUEUED }
+      );
 
-      if (error) throw error;
-      
-      if (!data) {
-        throw new Error("Chat group not found or already assigned");
-      }
-
-      // Invalidate related caches
-      await cacheService.invalidateChatGroup(chatGroupId);
-      
-      // Invalidate user's chat groups cache
+      // Also invalidate user's chat groups cache (specific to manual acceptance)
       const userCacheKey = `user_chat_groups_${userId}`;
       await cacheService.cache.delete('CHAT_GROUP', userCacheKey);
 
@@ -314,64 +235,16 @@ class QueueService {
       })
       .map((msg) => ({
         ...msg,
-        sender_type: this.determineSenderType(msg, currentUserId),
-        sender_name: this.getSenderName(msg),
-        sender_image: this.getSenderImageOptimized(msg)
+        sender_type: determineSenderType(msg, currentUserId),
+        sender_name: getSenderName(msg),
+        sender_image: getSenderImageOptimized(msg)
       }))
       .reverse();
 
     return messages;
   }
 
-  /**
-   * Determine the type of message sender
-   */
-  determineSenderType(message, currentUserId) {
-    if (message.client_id && !message.sys_user_id) {
-      return 'client';
-    } else if (message.sys_user_id) {
-      if (currentUserId && message.sys_user_id === currentUserId) {
-        return 'current_agent';
-      } else {
-        return 'previous_agent';
-      }
-    }
-    return 'system';
-  }
-
-  /**
-   * Get sender display name
-   */
-  getSenderName(message) {
-    if (message.client_id && !message.sys_user_id) {
-      return 'Client';
-    } else if (message.sys_user_id && message.sys_user?.profile) {
-      const firstName = message.sys_user.profile.prof_firstname || '';
-      const lastName = message.sys_user.profile.prof_lastname || '';
-      return `${firstName} ${lastName}`.trim() || 'Agent';
-    } else if (message.sys_user_id) {
-      return 'Agent';
-    }
-    return 'System';
-  }
-
-  /**
-   * Get sender profile image - Optimized version using joined data
-   */
-  getSenderImageOptimized(message) {
-    if (message.client_id && !message.sys_user_id && message.client?.profile?.image) {
-      // Client message - get current image from joined data
-      const images = message.client.profile.image || [];
-      const currentImage = images.find(img => img.img_is_current);
-      return currentImage?.img_location || null;
-    } else if (message.sys_user_id && message.sys_user?.profile?.image) {
-      // Agent message - get current image from joined data
-      const images = message.sys_user.profile.image || [];
-      const currentImage = images.find(img => img.img_is_current);
-      return currentImage?.img_location || null;
-    }
-    return null;
-  }
+  // determineSenderType, getSenderName, getSenderImageOptimized moved to utils/messageHelpers.js
 }
 
 module.exports = new QueueService();

@@ -62,6 +62,28 @@ class SessionService {
   }
 
   /**
+   * Touch a session — update lastAccessed and reset TTL
+   */
+  async touchSession(cache, sessionId) {
+    try {
+      const sessionData = await cache.getSession(sessionId);
+      if (!sessionData) {
+        console.log(`⚠️ Session: Session ${sessionId} not found for touch`);
+        return false;
+      }
+
+      sessionData.lastAccessed = new Date().toISOString();
+      await cache.createSession(sessionId, sessionData.userId, sessionData);
+
+      console.log(`✅ Session: Touched session ${sessionId}`);
+      return true;
+    } catch (error) {
+      console.error('❌ Session: Failed to touch session:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Delete a specific session
    */
   async deleteSession(cache, sessionId) {

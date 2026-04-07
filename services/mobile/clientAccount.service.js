@@ -347,7 +347,7 @@ class ClientAccountService {
   }
 
   /**
-   * Generate long-lived JWT token (30 days)
+   * Generate long-lived JWT token (7 days)
    * Used for passwordless authentication
    */
   generateLongLivedToken(clientId, clientNumber) {
@@ -361,7 +361,7 @@ class ClientAccountService {
         type: "client",
       },
       config.jwt.accessSecret,
-      { expiresIn: "30d" },
+      { expiresIn: "7d" },
     );
   }
 

@@ -1,4 +1,5 @@
 const supabase = require("../helpers/supabaseClient");
+const cacheService = require("./cache.service");
 
 class MacroService {
   /**
@@ -63,6 +64,7 @@ class MacroService {
       .single();
 
     if (error) throw error;
+    await cacheService.invalidateCannedMessages(roleId);
 
     return {
       id: data.canned_id,
@@ -97,6 +99,7 @@ class MacroService {
       .single();
 
     if (error) throw error;
+    await cacheService.invalidateCannedMessages();
 
     return {
       id: data.canned_id,
@@ -119,6 +122,7 @@ class MacroService {
       .single();
 
     if (error) throw error;
+    await cacheService.invalidateCannedMessages();
 
     return {
       success: true,

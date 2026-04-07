@@ -1,5 +1,6 @@
 const express = require("express");
 const agentService = require("../services/agent.service");
+const cacheService = require("../services/cache.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
 const { checkPermission, checkAnyPermission } = require("../middleware/checkPermission");
 const { PERMISSIONS } = require("../constants/permissions");
@@ -35,6 +36,18 @@ class AgentController {
       (req, res) => this.createAgent(req, res)
     );
 
+    // Get all user presences (online status)
+    router.get("/presence", 
+      checkPermission(PERMISSIONS.VIEW_MANAGE_AGENTS),
+      (req, res) => this.getAllPresences(req, res)
+    );
+
+    // Get specific user presence
+    router.get("/presence/:userId", 
+      checkPermission(PERMISSIONS.VIEW_MANAGE_AGENTS),
+      (req, res) => this.getUserPresence(req, res)
+    );
+
     return router;
   }
   /**
@@ -43,7 +56,7 @@ class AgentController {
   async getAllAgents(req, res) {
     try {
       const agents = await agentService.getAllAgents();
-      res.status(200).json(agents);
+      res.status(200).json({ data: agents });
     } catch (err) {
       console.error("❌ Error fetching agents:", err.message);
       res.status(500).json({ error: err.message });
@@ -56,7 +69,7 @@ class AgentController {
   async getActiveDepartments(req, res) {
     try {
       const departments = await agentService.getActiveDepartments();
-      res.status(200).json(departments);
+      res.status(200).json({ data: departments });
     } catch (err) {
       console.error("❌ Error fetching departments:", err.message);
       res.status(500).json({ error: err.message });
@@ -98,7 +111,7 @@ class AgentController {
         await agentService.updateAuthUser(authUserId, email, password);
       }
 
-      res.status(200).json({ message: "Agent updated successfully" });
+      res.status(200).json({ data: { message: "Agent updated successfully" } });
     } catch (err) {
       console.error("❌ Error updating agent:", err.message);
       res.status(500).json({ error: err.message });
@@ -118,9 +131,51 @@ class AgentController {
 
       const result = await agentService.createAgent(email, password, departments, role_id);
 
-      res.status(201).json(result);
+      res.status(201).json({ data: result });
     } catch (err) {
       console.error("❌ Error adding new agent:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  }
+
+  /**
+   * Get all user presences
+   */
+  async getAllPresences(req, res) {
+    try {
+      const presences = await cacheService.getAllUserPresence();
+      
+      // Convert object to array for easier frontend consumption
+      const presenceArray = Object.entries(presences).map(([userId, data]) => ({
+        userId: parseInt(userId),
+        ...data
+      }));
+
+      res.status(200).json({ 
+        data: presenceArray,
+        count: presenceArray.length 
+      });
+    } catch (err) {
+      console.error("❌ Error fetching presences:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  }
+
+  /**
+   * Get specific user presence
+   */
+  async getUserPresence(req, res) {
+    try {
+      const { userId } = req.params;
+      const presence = await cacheService.getUserPresence(userId);
+
+      if (!presence) {
+        return res.status(404).json({ error: "User presence not found" });
+      }
+
+      res.status(200).json({ data: presence });
+    } catch (err) {
+      console.error("❌ Error fetching user presence:", err.message);
       res.status(500).json({ error: err.message });
     }
   }

@@ -1,14 +1,28 @@
 const express = require("express");
+const rateLimit = require("express-rate-limit");
 const authService = require("../services/auth.service");
-const agentStatusService = require("../services/agentStatus.service");
+const profileService = require("../services/profile.service");
 const sessionService = require("../services/session.service");
+const config = require("../config/app");
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 attempts per window
+  message: { error: "Too many login attempts, please try again later" },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 class AuthController {
+  _cookieOptions(maxAge) {
+    return { ...config.jwt.cookieOptions, maxAge };
+  }
+
   getRouter() {
     const router = express.Router();
 
     // Login
-    router.post("/login", (req, res) => this.login(req, res));
+    router.post("/login", loginLimiter, (req, res) => this.login(req, res));
 
     // Refresh token
     router.post("/refresh", (req, res) => this.refreshToken(req, res));
@@ -48,7 +62,7 @@ class AuthController {
       // Create session with cache manager
       const cache = req.app.get('cache');
       let sessionId = null;
-      
+
       if (cache) {
         try {
           sessionId = await sessionService.createSession(cache, sysUser.sys_user_id, {
@@ -62,38 +76,19 @@ class AuthController {
         }
       }
 
-      // Set secure cookies (keeping original JWT approach)
-      res.cookie("access_token", session.access_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-        maxAge: 24 * 60 * 60 * 1000, // 1 day
-      });
+      // Set secure cookies
+      res.cookie("access_token", session.access_token, this._cookieOptions(24 * 60 * 60 * 1000));
+      res.cookie("refresh_token", session.refresh_token, this._cookieOptions(30 * 24 * 60 * 60 * 1000));
 
-      res.cookie("refresh_token", session.refresh_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      });
-
-      // Also set Redis session ID cookie
       if (sessionId) {
-        res.cookie("session_id", sessionId, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-          maxAge: 24 * 60 * 60 * 1000, // 1 day
-        });
+        res.cookie("session_id", sessionId, this._cookieOptions(24 * 60 * 60 * 1000));
       }
 
-      // Note: agent_status is now handled via Socket.IO events (agentOnline)
-      // The socket connection will automatically set the agent status
-
       res.json({
-        message: "Login successful",
-        user: { sys_user_id: sysUser.sys_user_id, role_id: sysUser.role_id },
-        session_id: sessionId // Include session ID in response
+        data: {
+          message: "Login successful",
+          user: { sys_user_id: sysUser.sys_user_id, role_id: sysUser.role_id },
+        }
       });
     } catch (err) {
       console.error("Login error:", err.message);
@@ -125,24 +120,13 @@ class AuthController {
       }
 
       // Update cookies with new tokens
-      res.cookie("access_token", session.access_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-        maxAge: 24 * 60 * 60 * 1000, // 1 day
-      });
-
-      res.cookie("refresh_token", session.refresh_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      });
+      res.cookie("access_token", session.access_token, this._cookieOptions(24 * 60 * 60 * 1000));
+      res.cookie("refresh_token", session.refresh_token, this._cookieOptions(30 * 24 * 60 * 60 * 1000));
 
       // Update session in cache if exists
       const sessionId = req.cookies.session_id;
       const cache = req.app.get('cache');
-      
+
       if (cache && sessionId) {
         try {
           await sessionService.touchSession(cache, sessionId);
@@ -153,17 +137,17 @@ class AuthController {
       }
 
       res.json({
-        message: "Token refreshed successfully",
-        access_token: session.access_token,
-        expires_at: session.expires_at
+        data: {
+          message: "Token refreshed successfully",
+        }
       });
     } catch (err) {
       console.error("Token refresh error:", err.message);
-      
+
       // Clear invalid tokens
       res.clearCookie("access_token");
       res.clearCookie("refresh_token");
-      
+
       res.status(401).json({ error: "Token refresh failed: " + err.message });
     }
   }
@@ -199,7 +183,7 @@ class AuthController {
 
       const sysUserId = await authService.getSystemUserIdFromToken(token);
 
-      res.json({ sys_user_id: sysUserId });
+      res.json({ data: { sys_user_id: sysUserId } });
     } catch (err) {
       console.error("Get user ID error:", err.message);
 
@@ -234,13 +218,13 @@ class AuthController {
       }
 
       res.json({
-        message: "Session valid",
-        session: {
-          userId: sessionData.userId,
-          email: sessionData.email,
-          role_id: sessionData.role_id,
-          createdAt: sessionData.createdAt,
-          lastAccessed: sessionData.lastAccessed
+        data: {
+          message: "Session valid",
+          session: {
+            userId: sessionData.userId,
+            createdAt: sessionData.createdAt,
+            lastAccessed: sessionData.lastAccessed
+          }
         }
       });
     } catch (error) {
@@ -258,7 +242,7 @@ class AuthController {
       const cache = req.app.get('cache');
       const token = req.cookies.access_token;
 
-      // Get user ID to update agent_status
+      // Get user ID to update user presence
       let userId = null;
       if (token) {
         try {
@@ -267,9 +251,6 @@ class AuthController {
           console.error('⚠️ Failed to get user ID from token:', err.message);
         }
       }
-
-      // Note: agent_status offline is now handled via Socket.IO events (agentOffline/disconnect)
-      // The socket disconnection will automatically set the agent status to offline
 
       // Delete session if it exists
       if (cache && sessionId) {
@@ -282,25 +263,11 @@ class AuthController {
       }
 
       // Clear cookies with the same options used when setting them
-      res.clearCookie("access_token", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-      });
+      res.clearCookie("access_token", config.jwt.cookieOptions);
+      res.clearCookie("refresh_token", config.jwt.cookieOptions);
+      res.clearCookie("session_id", config.jwt.cookieOptions);
 
-      res.clearCookie("refresh_token", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-      });
-
-      res.clearCookie("session_id", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-      });
-
-      res.json({ message: "Logged out" });
+      res.json({ data: { message: "Logged out" } });
     } catch (error) {
       console.error("Logout error:", error.message);
       res.status(500).json({ error: "Logout failed" });

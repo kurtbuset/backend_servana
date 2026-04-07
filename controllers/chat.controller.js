@@ -2,7 +2,12 @@ const express = require("express");
 const chatService = require("../services/chat.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
 const { checkPermission } = require("../middleware/checkPermission");
-const { PERMISSIONS } = require("../constants/permissions")
+const { PERMISSIONS } = require("../constants/permissions");
+const { formatChatGroups } = require("../utils/formatChatGroups");
+const { getProfileImages, getLatestMessageTimes } = require("../utils/messageHelpers");
+const { CHAT_STATUS } = require("../constants/statuses");
+const { parseDurationToSeconds } = require("../utils/parseDuration");
+const { getChatGroupInfo, getClientInfo } = require("../socket/customer-list");
 
 class ChatController {
   getRouter() {
@@ -40,14 +45,14 @@ class ChatController {
       (req, res) => this.resolveChatGroup(req, res)
     );
 
+    // Get room statistics (for monitoring) - protected by getCurrentUser middleware above
+    router.get("/admin/room-stats", (req, res) => this.getRoomStats(req, res));
+
     // Get chat messages for a specific client - requires message viewing permission
-    router.get("/:clientId", 
+    router.get("/:clientId",
       checkPermission(PERMISSIONS.VIEW_MESSAGE),
       (req, res) => this.getChatMessages(req, res)
     );
-    
-    // Get room statistics (for monitoring) - no specific permission needed for now
-    router.get("/admin/room-stats", (req, res) => this.getRoomStats(req, res));
 
     return router;
   }
@@ -62,7 +67,7 @@ class ChatController {
       const roleId = await chatService.getUserRole(userId);
       const messages = await chatService.getCannedMessagesByRole(roleId, userId);
 
-      res.json(messages);
+      res.json({ data: messages });
     } catch (err) {
       console.error("❌ Error fetching canned messages:", err);
       res.status(500).json({ error: "Failed to fetch canned messages" });
@@ -79,7 +84,7 @@ class ChatController {
       const groups = await chatService.getChatGroupsByUser(userId);
 
       if (!groups || groups.length === 0) {
-        return res.json([]);
+        return res.json({ data: [] });
       }
 
       // Extract profile IDs and chat group IDs more efficiently
@@ -96,60 +101,17 @@ class ChatController {
 
       // Get profile images and latest message times in parallel
       const [imageMap, timeMap] = await Promise.all([
-        profIds.length > 0 ? chatService.getProfileImages(profIds) : Promise.resolve({}),
-        chatService.getLatestMessageTimes(chatGroupIds),
+        profIds.length > 0 ? getProfileImages(profIds) : Promise.resolve({}),
+        getLatestMessageTimes(chatGroupIds),
       ]);
 
-      // Format response more efficiently
-      const formatted = groups.reduce((acc, group) => {
-        const client = group.client;
-        if (!client) return acc;
+      const sortedFormatted = formatChatGroups(groups, imageMap, timeMap, {
+        status: CHAT_STATUS.ACTIVE,
+        sysUserId: userId,
+        isAccepted: true,
+      });
 
-        const fullName = client.profile
-          ? `${client.profile.prof_firstname} ${client.profile.prof_lastname}`.trim()
-          : "Unknown Client";
-
-        // Get latest message time or use current time as fallback
-        const latestTime = timeMap[group.chat_group_id];
-        const displayTime = latestTime
-          ? new Date(latestTime).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-          : new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-
-        acc.push({
-          sys_user_id: userId,
-          chat_group_id: group.chat_group_id,
-          chat_group_name: fullName,
-          department: group.department?.dept_name || "Unknown",
-          customer: {
-            id: client.client_id,
-            chat_group_id: group.chat_group_id,
-            name: fullName,
-            number: client.client_number,
-            profile: imageMap[client.prof_id] || null,
-            time: displayTime,
-            isAccepted: true, // Active chats are always accepted
-            sys_user_id: group.sys_user_id, // Include the assigned user ID
-            status: "active", // Only active chats are returned
-          },
-          // Include raw timestamp for sorting
-          latestMessageTime: latestTime || new Date().toISOString(),
-        });
-
-        return acc;
-      }, []);
-
-      // Sort by latest message time (newest first) and remove the sorting field
-      const sortedFormatted = formatted
-        .sort((a, b) => new Date(b.latestMessageTime) - new Date(a.latestMessageTime))
-        .map(({ latestMessageTime, ...rest }) => rest);
-
-      res.json(sortedFormatted);
+      res.json({ data: sortedFormatted });
     } catch (err) {
       console.error("❌ Error fetching chat groups:", err);
       res.status(500).json({ error: "Failed to fetch chat groups" });
@@ -166,7 +128,7 @@ class ChatController {
       const groups = await chatService.getResolvedChatGroupsByUser(userId);
 
       if (!groups || groups.length === 0) {
-        return res.json([]);
+        return res.json({ data: [] });
       }
 
       // Extract profile IDs and chat group IDs more efficiently
@@ -183,60 +145,17 @@ class ChatController {
 
       // Get profile images and latest message times in parallel
       const [imageMap, timeMap] = await Promise.all([
-        profIds.length > 0 ? chatService.getProfileImages(profIds) : Promise.resolve({}),
-        chatService.getLatestMessageTimes(chatGroupIds),
+        profIds.length > 0 ? getProfileImages(profIds) : Promise.resolve({}),
+        getLatestMessageTimes(chatGroupIds),
       ]);
 
-      // Format response more efficiently
-      const formatted = groups.reduce((acc, group) => {
-        const client = group.client;
-        if (!client) return acc;
+      const sortedFormatted = formatChatGroups(groups, imageMap, timeMap, {
+        status: CHAT_STATUS.RESOLVED,
+        sysUserId: userId,
+        isAccepted: true,
+      });
 
-        const fullName = client.profile
-          ? `${client.profile.prof_firstname} ${client.profile.prof_lastname}`.trim()
-          : "Unknown Client";
-
-        // Get latest message time or use current time as fallback
-        const latestTime = timeMap[group.chat_group_id];
-        const displayTime = latestTime
-          ? new Date(latestTime).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-          : new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-
-        acc.push({
-          sys_user_id: userId,
-          chat_group_id: group.chat_group_id,
-          chat_group_name: fullName,
-          department: group.department?.dept_name || "Unknown",
-          customer: {
-            id: client.client_id,
-            chat_group_id: group.chat_group_id,
-            name: fullName,
-            number: client.client_number,
-            profile: imageMap[client.prof_id] || null,
-            time: displayTime,
-            isAccepted: true,
-            sys_user_id: group.sys_user_id,
-            status: "resolved",
-          },
-          // Include raw timestamp for sorting
-          latestMessageTime: latestTime || new Date().toISOString(),
-        });
-
-        return acc;
-      }, []);
-
-      // Sort by latest message time (newest first) and remove the sorting field
-      const sortedFormatted = formatted
-        .sort((a, b) => new Date(b.latestMessageTime) - new Date(a.latestMessageTime))
-        .map(({ latestMessageTime, ...rest }) => rest);
-
-      res.json(sortedFormatted);
+      res.json({ data: sortedFormatted });
     } catch (err) {
       console.error("❌ Error fetching resolved chat groups:", err);
       res.status(500).json({ error: "Failed to fetch resolved chat groups" });
@@ -258,18 +177,68 @@ class ChatController {
         });
       }
 
-      const transferredChat = await chatService.transferChatGroup(chatGroupId, deptId, userId);
+      const result = await chatService.transferChatGroup(chatGroupId, deptId, userId);
 
-      res.json({
-        success: true,
-        message: "Chat transferred successfully",
-        data: {
-          chat_group_id: transferredChat.chat_group_id,
-          dept_id: transferredChat.dept_id,
-          status: transferredChat.status,
-          sys_user_id: transferredChat.sys_user_id
+      // Emit socket event for real-time updates
+      const io = req.app.get('io');
+      if (io) {
+        // Get transfer details from service (department names, agent name)
+        const details = await chatService.getTransferDetails(
+          result.from_dept_id, deptId, result.assignmentResult
+        );
+
+        // Emit transfer message to chat room
+        io.to(`chat_${chatGroupId}`).emit('chatTransferred', {
+          chat_group_id: chatGroupId,
+          transfer_type: 'manual',
+          from_dept: details.fromDeptName,
+          to_dept: details.toDeptName,
+          to_agent: details.toAgentName,
+          assigned: result.assignmentResult.assigned,
+          timestamp: new Date().toISOString()
+        });
+
+        // Emit customerListUpdate to move chat to top of list for assigned agent
+        const chatGroupInfo = await getChatGroupInfo(chatGroupId);
+        if (chatGroupInfo && chatGroupInfo.sys_user_id) {
+          const clientInfo = await getClientInfo(chatGroupInfo.client_id);
+          if (clientInfo) {
+            const moveToTopPayload = {
+              type: 'move_to_top',
+              data: {
+                customer: {
+                  chat_group_id: chatGroupInfo.chat_group_id,
+                  name: clientInfo.name,
+                  number: clientInfo.client_number,
+                  profile: clientInfo.profile_image,
+                  status: chatGroupInfo.status,
+                  department: chatGroupInfo.department?.dept_name || "Unknown",
+                  sys_user_id: chatGroupInfo.sys_user_id,
+                  dept_id: chatGroupInfo.dept_id,
+                },
+              },
+              timestamp: new Date().toISOString(),
+            };
+
+            // Emit only to the assigned agent
+            const agentRoom = `agent_${chatGroupInfo.sys_user_id}`;
+            io.to(agentRoom).emit('customerListUpdate', moveToTopPayload);
+          }
         }
-      });
+      }
+
+      res.json({ data: {
+        success: true,
+        message: result.assignmentResult.assigned
+          ? `Chat transferred and assigned to agent ${result.assignmentResult.agentId}`
+          : "Chat transferred and queued (no available agents)",
+        chat_group_id: result.chat_group_id,
+        dept_id: result.dept_id,
+        status: result.status,
+        sys_user_id: result.sys_user_id,
+        assigned: result.assignmentResult.assigned,
+        assigned_agent_id: result.assignmentResult.agentId || null,
+      }});
     } catch (err) {
       console.error("❌ Error transferring chat:", err);
 
@@ -288,6 +257,7 @@ class ChatController {
     try {
       const { chatGroupId } = req.params;
       const { userId } = req;
+      const feedbackData = req.body || {};
 
       if (!chatGroupId) {
         return res.status(400).json({
@@ -295,17 +265,49 @@ class ChatController {
         });
       }
 
-      const resolvedChat = await chatService.resolveChatGroup(chatGroupId, userId);
+      // Convert duration from formatted string to seconds if provided
+      if (feedbackData.chatDuration) {
+        feedbackData.chatDurationSeconds = parseDurationToSeconds(feedbackData.chatDuration);
+      }
 
-      res.json({
+      const resolvedChat = await chatService.resolveChatGroup(chatGroupId, userId, feedbackData);
+
+      // Emit socket notification for chat resolution
+      const io = req.app.get('io');
+      if (io) {
+        // Create system message for the chat resolution
+        const systemMessage = {
+          chat_id: `system_${Date.now()}`,
+          chat_body: "Chat ended by agent",
+          chat_group_id: chatGroupId,
+          chat_created_at: resolvedChat.resolved_at,
+          sys_user_id: null,
+          client_id: null,
+          sender_type: "system"
+        };
+
+        // Broadcast to all users in the chat room
+        const eventData = {
+          chat_group_id: chatGroupId,
+          status: "resolved",
+          resolved_at: resolvedChat.resolved_at,
+          resolved_by_type: "agent",
+          resolved_by_id: userId,
+          system_message: systemMessage,
+        };
+
+        io.to(`chat_${chatGroupId}`).emit("chat:resolved", eventData);
+        // console.log(`💻 Chat ${chatGroupId} resolved by agent ${userId}`);
+      }
+
+      res.json({ data: {
         success: true,
         message: "Chat resolved successfully",
-        data: {
-          chat_group_id: resolvedChat.chat_group_id,
-          status: resolvedChat.status,
-          resolved_at: resolvedChat.resolved_at
-        }
-      });
+        chat_group_id: resolvedChat.chat_group_id,
+        status: resolvedChat.status,
+        resolved_at: resolvedChat.resolved_at,
+        feedback: resolvedChat.feedback
+      } });
     } catch (err) {
       console.error("❌ Error resolving chat:", err.message);
       res.status(500).json({ error: "Failed to resolve chat" });
@@ -318,12 +320,32 @@ class ChatController {
   async getChatMessages(req, res) {
     try {
       const { clientId } = req.params;
-      const { before, limit = 10 } = req.query;
+      const { before, limit } = req.query;
       const { userId } = req;
 
-      const messages = await chatService.getChatMessages(clientId, before, limit, userId);
+      // Pagination limits for performance
+      const DEFAULT_LIMIT = 30;
+      const MAX_LIMIT = 100;
+      const MIN_LIMIT = 10;
 
-      res.json({ messages });
+      // Parse and validate limit
+      const requestedLimit = parseInt(limit) || DEFAULT_LIMIT;
+      const safeLimit = Math.max(MIN_LIMIT, Math.min(requestedLimit, MAX_LIMIT));
+
+      const result = await chatService.getChatMessages(clientId, before, safeLimit, userId);
+
+      // Add pagination metadata
+      const response = {
+        messages: result.messages,
+        pagination: {
+          limit: safeLimit,
+          hasMore: result.messages.length === safeLimit,
+          oldestTimestamp: result.messages.length > 0 ? result.messages[0]?.chat_created_at : null,
+          count: result.messages.length
+        }
+      };
+
+      res.json({ data: response });
     } catch (err) {
       console.error("❌ Error fetching chat messages:", err);
 
@@ -380,47 +402,10 @@ class ChatController {
       // Sort rooms by user count (most active first)
       roomStats.activeRooms.sort((a, b) => b.userCount - a.userCount);
 
-      res.json(roomStats);
+      res.json({ data: roomStats });
     } catch (err) {
       console.error("❌ Error getting room stats:", err.message);
       res.status(500).json({ error: "Failed to get room statistics" });
-    }
-  }
-  async handleSendMessage(rawMessage, io, socket) {
-    try {
-      // Validate message structure - must have either sys_user_id (agent) or client_id (client)
-      const isAgent = rawMessage.sys_user_id && !rawMessage.client_id;
-      const isClient = rawMessage.client_id && !rawMessage.sys_user_id;
-      
-      if (!isAgent && !isClient) {
-        throw new Error("Message must have either sys_user_id (agent) or client_id (client)");
-      }
-      
-      if (!rawMessage.chat_body || !rawMessage.chat_group_id) {
-        throw new Error("chat_body and chat_group_id are required");
-      }
-
-      // Prepare message for database insertion
-      const message = {
-        chat_body: rawMessage.chat_body,
-        chat_group_id: rawMessage.chat_group_id,
-        chat_created_at: new Date().toISOString(),
-        // Set either sys_user_id or client_id based on sender type
-        ...(isAgent && { sys_user_id: rawMessage.sys_user_id }),
-        ...(isClient && { client_id: rawMessage.client_id })
-      };
-
-      // Insert message into database
-      const insertedMessage = await chatService.insertMessage(message);
-
-      if (insertedMessage) {
-        return insertedMessage;
-      }
-
-      throw new Error("Failed to insert message into database");
-    } catch (err) {
-      console.error("❌ handleSendMessage error:", err.message);
-      throw err;
     }
   }
 }

@@ -21,7 +21,7 @@ class AgentService {
       const cachedAgents = await cacheService.getAgents();
       
       if (cachedAgents !== null && cachedAgents !== undefined) {
-        console.log(`✅ Cache HIT: Retrieved ${cachedAgents.length} agents from Redis cache`);
+        // console.log(`✅ Cache HIT: Retrieved ${cachedAgents.length} agents from Redis cache`);
         return cachedAgents;
       }
       
@@ -164,7 +164,7 @@ class AgentService {
           .map(dept => dept.dept_name)
           .sort();
         
-        console.log(`✅ Cache HIT: Retrieved ${activeDepartmentNames.length} active departments from cache`);
+        // console.log(`✅ Cache HIT: Retrieved ${activeDepartmentNames.length} active departments from cache`);
         return activeDepartmentNames;
       }
       
@@ -300,12 +300,10 @@ class AgentService {
   }
 
   /**
-   * Create new agent
+   * Create new agent using atomic RPC (with manual fallback)
    */
   async createAgent(email, password, departments, roleId = null) {
     let authUserId = null;
-    let newUserId = null;
-    let profileId = null;
 
     try {
       // Step 1: Get Agent role ID if not provided
@@ -313,7 +311,7 @@ class AgentService {
         roleId = await roleService.getRoleId(ROLE_NAMES.AGENT);
       }
 
-      // Step 2: Create Supabase Auth user
+      // Step 2: Create Supabase Auth user (external, cannot be in DB transaction)
       const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
         email,
         password,
@@ -324,69 +322,47 @@ class AgentService {
         console.error('❌ Auth user creation failed:', authError);
         throw authError;
       }
-      
+
       authUserId = authUser.user.id;
 
-      // Step 3: Create profile
-      const profile = await profileService.createMinimalProfile();
-      profileId = profile.prof_id;
-
-      // Step 4: Insert system_user with profile link
-      const { data: insertedUser, error: insertError } = await supabase
-        .from("sys_user")
-        .insert({
-          sys_user_email: email,
-          sys_user_is_active: true,
-          supabase_user_id: authUserId,
-          prof_id: profileId, // Link to the created profile
-          sys_user_created_at: new Date(),
-          role_id: roleId,
-        })
-        .select("sys_user_id")
-        .single();
-
-      if (insertError) {
-        console.error('❌ System user creation failed:', insertError);
-        throw insertError;
-      }
-
-      newUserId = insertedUser.sys_user_id;
-
-      // Step 5: Handle departments
+      // Step 3: Resolve department IDs
+      let deptIds = [];
       if (departments && departments.length > 0) {
         const deptRows = await this.getDepartmentIdsByNames(departments);
-        await this.insertUserDepartments(newUserId, deptRows.map((d) => d.dept_id));
+        deptIds = deptRows.map((d) => d.dept_id);
+      }
+
+      // Step 4: Create profile + sys_user + departments atomically via RPC
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('create_agent_atomic', {
+        p_email: email,
+        p_role_id: roleId,
+        p_supabase_user_id: authUserId,
+        p_dept_ids: deptIds,
+      });
+
+      if (rpcError) {
+        console.error('❌ Atomic agent creation failed:', rpcError.message);
+        throw rpcError;
       }
 
       // Invalidate agents cache after successful creation
       await cacheService.invalidateAgents();
       console.log("🧹 Invalidated agents cache after agent creation");
 
-      return { id: newUserId, email };
+      return { id: rpcResult.sys_user_id, email };
 
     } catch (error) {
       console.error(`❌ Agent creation failed for ${email}:`, error.message);
 
-      // Rollback operations in reverse order
-      try {
-        // Remove system user if created
-        if (newUserId) {
-          await supabase.from("sys_user").delete().eq("sys_user_id", newUserId);
-        }
-
-        // Remove profile if created
-        if (profileId) {
-          await supabase.from("profile").delete().eq("prof_id", profileId);
-        }
-
-        // Remove auth user if created
-        if (authUserId) {
+      // Only need to rollback auth user — DB operations are atomic via RPC
+      if (authUserId) {
+        try {
+          console.log(`🔄 Rolling back auth user: ${authUserId}`);
           await supabase.auth.admin.deleteUser(authUserId);
+          console.log('✅ Auth rollback completed');
+        } catch (rollbackError) {
+          console.error('❌ Auth rollback failed:', rollbackError.message);
         }
-
-      } catch (rollbackError) {
-        console.error('❌ Rollback failed:', rollbackError.message);
-        // Don't throw rollback error, throw original error
       }
 
       throw error;

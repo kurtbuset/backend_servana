@@ -12,7 +12,7 @@ class ChangeRoleService {
       const cachedUsersWithRoles = await cacheService.getUsersWithRoles();
       
       if (cachedUsersWithRoles !== null && cachedUsersWithRoles !== undefined) {
-        console.log(`✅ Cache HIT: Retrieved ${cachedUsersWithRoles.length} users with roles from Redis cache`);
+        // console.log(`✅ Cache HIT: Retrieved ${cachedUsersWithRoles.length} users with roles from Redis cache`);
         return cachedUsersWithRoles;
       }
       
@@ -102,7 +102,7 @@ class ChangeRoleService {
       const cachedRoles = await cacheService.getRoles();
       
       if (cachedRoles !== null && cachedRoles !== undefined) {
-        console.log(`✅ Cache HIT: Retrieved ${cachedRoles.length} roles from Redis cache`);
+        // console.log(`✅ Cache HIT: Retrieved ${cachedRoles.length} roles from Redis cache`);
         return cachedRoles;
       }
       

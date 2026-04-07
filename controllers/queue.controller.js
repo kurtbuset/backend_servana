@@ -3,6 +3,9 @@ const queueService = require("../services/queue.service");
 const getCurrentUser = require("../middleware/getCurrentUser");
 const { checkPermission } = require("../middleware/checkPermission");
 const { PERMISSIONS } = require("../constants/permissions");
+const { formatChatGroups } = require("../utils/formatChatGroups");
+const { getProfileImages, getLatestMessageTimes } = require("../utils/messageHelpers");
+const { handleChatAccepted } = require("../socket/customer-list");
 
 class QueueController {
   getRouter() {
@@ -11,21 +14,24 @@ class QueueController {
     router.use(getCurrentUser);
 
     // Get unassigned chat groups (queue) - requires message viewing permission
-    router.get("/chatgroups", 
+    router.get(
+      "/chatgroups",
       checkPermission(PERMISSIONS.VIEW_MESSAGE),
-      (req, res) => this.getChatGroups(req, res)
+      (req, res) => this.getChatGroups(req, res),
     );
 
     // Accept a chat from the queue - requires message viewing permission
-    router.post("/:chatGroupId/accept", 
+    router.post(
+      "/:chatGroupId/accept",
       checkPermission(PERMISSIONS.VIEW_MESSAGE),
-      (req, res) => this.acceptChat(req, res)
+      (req, res) => this.acceptChat(req, res),
     );
 
     // Get chat messages and assign to user - requires message viewing permission
-    router.get("/:clientId", 
+    router.get(
+      "/:clientId",
       checkPermission(PERMISSIONS.VIEW_MESSAGE),
-      (req, res) => this.getChatMessages(req, res)
+      (req, res) => this.getChatMessages(req, res),
     );
 
     return router;
@@ -39,7 +45,7 @@ class QueueController {
       const groups = await queueService.getUnassignedChatGroups(userId);
 
       if (!groups || groups.length === 0) {
-        return res.json([]);
+        return res.json({ data: [] });
       }
 
       // Extract profile IDs and chat group IDs
@@ -51,56 +57,13 @@ class QueueController {
 
       // Get profile images and latest message times
       const [imageMap, timeMap] = await Promise.all([
-        queueService.getProfileImages(profIds),
-        queueService.getLatestMessageTimes(chatGroupIds),
+        getProfileImages(profIds),
+        getLatestMessageTimes(chatGroupIds),
       ]);
 
-      // Format response
-      const formatted = groups.map((group) => {
-        const client = group.client;
-        if (!client) return null;
+      const sortedFormatted = formatChatGroups(groups, imageMap, timeMap);
 
-        const fullName = client.profile
-          ? `${client.profile.prof_firstname} ${client.profile.prof_lastname}`
-          : "Unknown Client";
-
-        // Get latest message time or use current time as fallback
-        const latestTime = timeMap[group.chat_group_id];
-        const displayTime = latestTime
-          ? new Date(latestTime).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })
-          : new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-
-        return {
-          chat_group_id: group.chat_group_id,
-          chat_group_name: fullName,
-          department: group.department?.dept_name || "Unknown",
-          customer: {
-            id: client.client_id,
-            chat_group_id: group.chat_group_id,
-            name: fullName,
-            number: client.client_number,
-            profile: imageMap[client.prof_id] || null,
-            time: displayTime,
-            status: group.status, // Include the actual status (queued or transferred)
-          },
-          // Include raw timestamp for sorting
-          latestMessageTime: latestTime || new Date().toISOString(),
-        };
-      });
-
-      // Sort by latest message time (newest first) and remove the sorting field
-      const sortedFormatted = formatted
-        .filter(Boolean)
-        .sort((a, b) => new Date(b.latestMessageTime) - new Date(a.latestMessageTime))
-        .map(({ latestMessageTime, ...rest }) => rest);
-
-      res.json(sortedFormatted);
+      res.json({ data: sortedFormatted });
     } catch (err) {
       console.error("❌ Error fetching chat groups:", err);
       res.status(500).json({ error: "Failed to fetch chat groups" });
@@ -121,36 +84,26 @@ class QueueController {
 
       const chatGroup = await queueService.acceptChat(chatGroupId, userId);
 
-      // Emit socket notification for accepted chat
+      // Emit customerListUpdate so other agents remove this chat from their queue
       const io = req.app.get('io');
-      if (io && io.socketConfig) {
-        const notifier = io.socketConfig.getChatGroupNotifier();
-        if (notifier) {
-          // Get chat group details for notification
-          const chatGroupDetails = await queueService.getChatGroupDetails(chatGroupId);
-          
-          if (chatGroupDetails) {
-            await notifier.notifyChatAccepted(chatGroupDetails, userId);
-          }
-        }
+      if (io) {
+        await handleChatAccepted(io, chatGroupId, userId);
       }
 
-      res.json({
+      res.json({ data: {
         success: true,
         message: "Chat accepted successfully",
-        data: {
-          chat_group_id: chatGroup.chat_group_id,
-          sys_user_id: chatGroup.sys_user_id,
-          status: chatGroup.status
-        }
-      });
+        chat_group_id: chatGroup.chat_group_id,
+        sys_user_id: chatGroup.sys_user_id,
+        status: chatGroup.status,
+      } });
     } catch (err) {
       console.error("❌ Error accepting chat:", err);
-      
+
       if (err.message === "Chat group not found or already assigned") {
         return res.status(404).json({ error: err.message });
       }
-      
+
       res.status(500).json({ error: "Failed to accept chat" });
     }
   }
@@ -171,39 +124,18 @@ class QueueController {
         return res.status(404).json({ error: "Chat group not found" });
       }
 
-      const groupIdsToFetch = [];
-
-      // Process each group
-      for (const group of groups) {
-        const { chat_group_id, sys_user_id } = group;
-
-        // if (sys_user_id === null) {
-        //   // Update chat_group.sys_user_id to current user
-        //   await queueService.assignChatGroupToUser(chat_group_id, userId);
-
-        //   // Check if sys_user_chat_group already exists
-        //   const existingLink = await queueService.checkUserChatGroupLink(userId, chat_group_id);
-
-        //   // Insert new sys_user_chat_group link if not exists
-        //   if (!existingLink) {
-        //     await queueService.createUserChatGroupLink(userId, chat_group_id);
-        //   }
-
-        //   groupIdsToFetch.push(chat_group_id);
-        // } else {
-        //   // Still add to groupIdsToFetch if user already linked
-        //   const existingLink = await queueService.checkUserChatGroupLink(userId, chat_group_id);
-
-        //   if (existingLink) {
-            groupIdsToFetch.push(chat_group_id);
-          // }
-        // }
-      }
+      const groupIdsToFetch = groups.map((g) => g.chat_group_id);
 
       // Fetch chats
-      const messages = await queueService.getChatMessages(clientId, groupIdsToFetch, before, limit, userId);
+      const messages = await queueService.getChatMessages(
+        clientId,
+        groupIdsToFetch,
+        before,
+        limit,
+        userId,
+      );
 
-      res.json({ messages });
+      res.json({ data: { messages } });
     } catch (err) {
       console.error("❌ Error fetching messages:", err);
       res.status(500).json({ error: err.message });

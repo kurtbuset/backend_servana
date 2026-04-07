@@ -1,21 +1,31 @@
 const express = require("express");
+const rateLimit = require("express-rate-limit");
 const otpService = require("../../services/mobile/otp.service");
 const clientAccountService = require("../../services/mobile/clientAccount.service");
+const smsService = require("../../services/sms.service");
+
+const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // 5 OTP requests per window
+  message: { error: "Too many OTP requests, please try again later" },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 class OtpController {
   getRouter() {
     const router = express.Router();
 
     // Public routes (no authentication required)
-    router.post("/request-otp", (req, res) => this.requestOtp(req, res));
-    router.post("/verify-otp", (req, res) => this.verifyOtp(req, res));
+    router.post("/request-otp", otpLimiter, (req, res) => this.requestOtp(req, res));
+    router.post("/verify-otp", otpLimiter, (req, res) => this.verifyOtp(req, res));
 
     // Global error handler
     router.use((err, req, res, next) => {
       console.error("Unhandled error:", err);
       res
         .status(500)
-        .json({ error: "Internal server error", details: String(err) });
+        .json({ error: "Internal server error" });
     });
 
     return router;
@@ -47,22 +57,23 @@ class OtpController {
         clientId,
       );
 
-      // Log OTP for development (remove in production)
-      console.log(
-        `🔐 OTP for ${phone_country_code}${phone_number}: ${result.otp}`,
-      );
+      // Send OTP via SMS
+      if (process.env.SEMAPHORE_API_KEY) {
+        try {
+          await smsService.sendOtpSms(phone_country_code, phone_number, result.otp);
+        } catch (smsError) {
+          console.error('Failed to send SMS:', smsError.message);
+        }
+      } else {
+        // Development mode - log OTP to console
+        console.log(`🔐 Development OTP for ${phone_country_code}${phone_number}: ${result.otp}`);
+      }
 
-      // TODO: Send SMS in production
-      // await smsGateway.send(
-      //   phone_country_code + phone_number,
-      //   `Your verification code is: ${result.otp}`
-      // );
-
-      res.json({
+      res.json({ data: {  
         message: "OTP sent successfully",
         is_new_user: result.isNewUser,
         otp_expires_in: result.expiresIn,
-      });
+      } });
     } catch (err) {
       console.error("Request OTP error:", err);
 
@@ -118,13 +129,18 @@ class OtpController {
         client.client_number,
       );
 
-      res.json({
+      res.json({ data: {
         message: "Authenticated successfully",
         is_new_user: isNewUser,
         requires_profile: !client.prof_id,
         token,
-        client,
-      });
+        client: {
+          client_id: client.client_id,
+          client_number: client.client_number,
+          client_country_code: client.client_country_code,
+          prof_id: client.prof_id,
+        },
+      } });
     } catch (err) {
       console.error("Verify OTP error:", err);
 

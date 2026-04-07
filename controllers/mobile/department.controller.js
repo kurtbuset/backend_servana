@@ -20,7 +20,7 @@ class MobileDepartmentController {
   async getActiveDepartments(req, res) {
     try {
       const departments = await mobileDepartmentService.getActiveDepartments();
-      res.json({ departments });
+      res.json({ data: { departments } });
     } catch (error) {
       console.error("Error fetching departments:", error);
       res.status(500).json({ error: "Failed to fetch departments" });

@@ -22,7 +22,7 @@ class ChangeRoleController {
       (req, res) => this.getAllRoles(req, res)
     );
 
-    // Update a user's role or active status - requires edit change roles permission
+    // Update a user's role or active status - requires edait chnge roles permission
     router.put("/:id", 
       checkPermission(PERMISSIONS.EDIT_CHANGE_ROLES),
       (req, res) => this.updateUserRole(req, res)
@@ -36,7 +36,7 @@ class ChangeRoleController {
   async getAllUsersWithRoles(req, res) {
     try {
       const users = await changeRoleService.getAllUsersWithRoles();
-      res.status(200).json(users);
+      res.status(200).json({ data: users });
     } catch (err) {
       console.error("Error fetching users:", err.message);
       res.status(500).json({ error: "Failed to fetch users" });
@@ -49,7 +49,7 @@ class ChangeRoleController {
   async getAllRoles(req, res) {
     try {
       const roles = await changeRoleService.getAllRoles();
-      res.status(200).json(roles);
+      res.status(200).json({ data: roles });
     } catch (err) {
       console.error("Error fetching roles:", err.message);
       res.status(500).json({ error: "Failed to fetch roles" });
@@ -63,7 +63,7 @@ class ChangeRoleController {
     try {
       const { id } = req.params;
       const { role_id, sys_user_is_active } = req.body;
-      const updatedBy = req.user?.sys_user_id || null;
+      const updatedBy = req.userId || null;
 
       const updatedUser = await changeRoleService.updateUserRole(
         id,
@@ -72,7 +72,7 @@ class ChangeRoleController {
         updatedBy
       );
 
-      res.status(200).json(updatedUser);
+      res.status(200).json({ data: updatedUser });
     } catch (err) {
       console.error("Error updating user:", err.message);
       res.status(500).json({ error: "Failed to update user" });

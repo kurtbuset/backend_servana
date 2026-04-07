@@ -90,26 +90,6 @@ class AuthService {
 
     return data;
   }
-
-  /**
-   * Update agent status
-   */
-  async updateAgentStatus(userId, status) {
-    const validStatuses = ['accepting_chats', 'not_accepting_chats', 'offline'];
-    
-    if (!validStatuses.includes(status)) {
-      throw new Error(`Invalid agent status: ${status}`);
-    }
-
-    const { data, error } = await supabase
-      .from("sys_user")
-      .update({ agent_status: status })
-      .eq("sys_user_id", userId)
-      .select();
-
-    if (error) throw error;
-    return data;
-  }
 }
 
 module.exports = new AuthService();
