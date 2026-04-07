@@ -178,7 +178,7 @@ function initializeSocket(server, allowedOrigins) {
           // Log room leave with stats
           const previousRoomSize = io.sockets.adapter.rooms.get(previousRoom)?.size || 0;
           const totalRooms = io.sockets.adapter.rooms.size;
-          console.log(`🚪 ${socket.user.userType} ${socket.user.userId} left room: ${previousRoom} | Users in room: ${previousRoomSize} | Total rooms: ${totalRooms}`);
+          // console.log(`🚪 ${socket.user.userType} ${socket.user.userId} left room: ${previousRoom} | Users in room: ${previousRoomSize} | Total rooms: ${totalRooms}`);
           
           handleUserLeft(
             io,
@@ -377,7 +377,7 @@ function initializeSocket(server, allowedOrigins) {
         const roomSize = io.sockets.adapter.rooms.get(roomName)?.size || 0;
         const totalRooms = io.sockets.adapter.rooms.size;
         const totalConnections = io.sockets.sockets.size;
-        console.log(`🚪 ${socket.user.userType} ${socket.user.userId} left room: ${roomName} | Users in room: ${roomSize} | Total rooms: ${totalRooms} | Total connections: ${totalConnections}`);
+        console.log(`Users in room: ${roomSize} | Total rooms: ${totalRooms} | Total connections: ${totalConnections}`);
         
         // Notify others in the room
         handleUserLeft(
@@ -430,7 +430,7 @@ function initializeSocket(server, allowedOrigins) {
     });
   });
 
-  console.log("🔌 Simplified Socket.IO server initialized");
+  console.log("Socket.IO server initialized");
 
   // Add utility functions to io instance
   io.getStats = () => getConnectionStats(io);

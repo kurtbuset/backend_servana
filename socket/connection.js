@@ -270,11 +270,6 @@ function setupDisconnectHandler(socket, io) {
 
       socket.leave(roomName);
 
-      // Log room leave on disconnect
-      console.log(
-        `🚪 ${socket.user?.userType} ${socket.user?.userId} left room: ${roomName} on disconnect (${roomSize - 1} users remaining)`,
-      );
-
       // Log all rooms this socket was in
       const userRooms = Array.from(socket.rooms).filter(
         (room) => room !== socket.id,

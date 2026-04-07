@@ -1,6 +1,5 @@
 const supabase = require("../helpers/supabaseClient");
 const cacheService = require("./cache.service");
-const cookie = require("cookie");
 const agentAssignmentService = require("./agentAssignment.service");
 const {
   determineSenderType,
@@ -60,9 +59,6 @@ class ChatService {
       const cachedGroups = await cacheService.getUserChatGroups(userId);
       
       if (cachedGroups) {
-        console.log(
-          `✅ Cache HIT: Retrieved ${cachedGroups.length} chat groups for user ${userId}`,
-        );
         return cachedGroups;
       }
 
@@ -156,21 +152,6 @@ class ChatService {
     }
   }
 
-  // getProfileImages and getLatestMessageTimes moved to utils/messageHelpers.js
-
-  /**
-   * Get chat groups by client ID
-   */
-  async getChatGroupsByClient(clientId) {
-    const { data: groups, error: groupsErr } = await supabase
-      .from("chat_group")
-      .select("chat_group_id")
-      .eq("client_id", clientId);
-
-    if (groupsErr) throw groupsErr;
-    return groups || [];
-  }
-
   /**
    * Get chat messages with pagination and sender information - Optimized with caching
    */
@@ -184,9 +165,6 @@ class ChatService {
       // Enforce limit bounds for performance
       const MAX_LIMIT = 100;
       const safeLimit = Math.min(parseInt(limit, 10), MAX_LIMIT);
-
-      // messageId can be either a chat_group_id or client_id
-      // First try to use it as chat_group_id, if that fails, treat as client_id
 
       let chatGroupId = null;
 
@@ -217,14 +195,12 @@ class ChatService {
         }
 
         chatGroupId = activeGroup.chat_group_id;
-        console.log(
-          `✅ Using client's most recent active chat group: ${chatGroupId}`,
-        );
       }
 
       // Try to get recent messages from cache first
       let cachedMessages = [];
       if (!before && safeLimit <= 50) {
+        console.log('chat messages fetching from cache...')
         cachedMessages = await cacheService.getChatMessages(chatGroupId);
 
         if (cachedMessages.length > 0) {
@@ -411,6 +387,23 @@ class ChatService {
    */
   async insertMessage(messageData) {
     try {
+      // Verify chat group exists and is not resolved
+      if (messageData.chat_group_id) {
+        const { data: chatGroup, error: groupError } = await supabase
+          .from("chat_group")
+          .select("chat_group_id, status")
+          .eq("chat_group_id", messageData.chat_group_id)
+          .single();
+
+        if (groupError) {
+          throw new Error("Chat group not found");
+        }
+
+        if (chatGroup.status === "resolved") {
+          throw new Error("Cannot send messages to a resolved chat");
+        }
+      }
+
       const { data, error: insertError } = await supabase
         .from("chat")
         .insert([messageData])
@@ -423,11 +416,6 @@ class ChatService {
       // Invalidate chat message cache for this group
       if (newMessage && newMessage.chat_group_id) {
         await cacheService.invalidateChatMessages(newMessage.chat_group_id);
-
-        // Also invalidate user's chat groups cache if they're assigned
-        // if (newMessage.sys_user_id) {
-        //   await cacheService.invalidateUserChatGroups(newMessage.sys_user_id);
-        // }
       }
 
       return newMessage;
@@ -592,7 +580,6 @@ class ChatService {
             client_id: chatGroup.client_id,
             rating: feedbackData.rating || null,
             feedback_text: feedbackData.feedback || null,
-            chat_duration_seconds: feedbackData.chatDurationSeconds || null,
             message_count: feedbackData.messageCount || null,
           })
           .select()

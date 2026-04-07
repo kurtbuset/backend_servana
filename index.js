@@ -97,7 +97,7 @@ async function startServer() {
       const heapUsedMB = Math.round(memoryUsage.heapUsed / 1024 / 1024);
       const heapTotalMB = Math.round(memoryUsage.heapTotal / 1024 / 1024);
 
-      console.log(`💾 Memory: ${heapUsedMB}MB / ${heapTotalMB}MB`);
+      // console.log(`💾 Memory: ${heapUsedMB}MB / ${heapTotalMB}MB`);
 
       // Alert if memory usage is high
       if (memoryUsage.heapUsed > 500 * 1024 * 1024) { // 500MB

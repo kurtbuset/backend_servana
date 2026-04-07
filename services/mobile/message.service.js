@@ -8,6 +8,21 @@ class MobileMessageService {
    * Invalidates cache for the chat group
    */
   async createMessage(chatBody, clientId, chatGroupId) {
+    // Verify chat group exists and is not resolved
+    const { data: chatGroup, error: groupError } = await supabase
+      .from("chat_group")
+      .select("chat_group_id, status")
+      .eq("chat_group_id", chatGroupId)
+      .single();
+
+    if (groupError) {
+      throw new Error("Chat group not found");
+    }
+
+    if (chatGroup.status === "resolved") {
+      throw new Error("Cannot send messages to a resolved chat");
+    }
+
     const { data, error } = await supabase
       .from("chat")
       .insert([
@@ -22,12 +37,7 @@ class MobileMessageService {
 
     if (error) throw error;
 
-    // Invalidate cache for this chat group (all limit variations)
     await cacheService.invalidateChatMessages(chatGroupId);
-    // Also invalidate with common limit patterns
-    await cacheService.invalidateChatMessages(`${chatGroupId}_30`);
-    await cacheService.invalidateChatMessages(`${chatGroupId}_50`);
-    await cacheService.invalidateChatMessages(`${chatGroupId}_100`);
 
     return data;
   }
@@ -52,19 +62,41 @@ class MobileMessageService {
     const MAX_LIMIT = 100;
     const safeLimit = Math.min(parseInt(limit, 10), MAX_LIMIT);
 
-    // Create cache key with pagination parameters
-    // Only cache the first page (no 'before' parameter) to keep cache simple
-    const shouldCache = !before;
-    const cacheKey = `${chatGroupId}_${safeLimit}`;
+    console.log('safeLimit: ', safeLimit)
 
-    // Try to get from cache (only for first page)
-    if (shouldCache) {
-      const cachedData = await cacheService.getChatMessages(cacheKey);
-      if (cachedData && cachedData.messages && cachedData.messages.length > 0) {
-        console.log(`✅ Cache hit for chat messages: ${cacheKey}`);
-        return cachedData;
+    const shouldCache = !before;
+    // Try to get from cache (only for first page and if limit <= 50)
+    if (shouldCache && safeLimit <= 50) {
+      const cachedData = await cacheService.getChatMessages(chatGroupId);
+      if (cachedData && cachedData.length > 0) {
+        console.log('✅ Cache hit for chat messages');
+        
+        // Sort DESC (newest first), take requested amount, then reverse to ASC
+        cachedData.sort((a, b) => new Date(b.chat_created_at) - new Date(a.chat_created_at));
+        const limitedMessages = cachedData.slice(0, safeLimit);
+        
+        // Process cached messages to match expected format
+        const processedMessages = limitedMessages.map((msg) => {
+          if (msg.message_type === "transfer") {
+            return msg;
+          }
+          return {
+            ...msg,
+            sender_type: this.determineSenderType(msg, currentClientId),
+            sender_name: this.getSenderName(msg),
+            sender_image: this.getSenderImageOptimized(msg),
+          };
+        }).reverse(); // Reverse to ASC (oldest first) for UI display
+
+        return {
+          messages: processedMessages,
+          hasMore: cachedData.length >= safeLimit,
+          count: processedMessages.length,
+          oldestTimestamp: processedMessages.length > 0 ? processedMessages[0].chat_created_at : null,
+          newestTimestamp: processedMessages.length > 0 ? processedMessages[processedMessages.length - 1].chat_created_at : null,
+        };
       }
-      console.log(`⚠️ Cache miss for chat messages: ${cacheKey}`);
+      console.log(`⚠️ Cache miss for chat messages`);
     }
 
     let query = supabase
@@ -220,9 +252,10 @@ class MobileMessageService {
     };
 
     // Cache the result (only for first page) with 2-minute TTL
+    // Always cache up to 50 messages for consistency with web service
     if (shouldCache && messages.length > 0) {
-      await cacheService.cacheChatMessages(cacheKey, result.messages, safeLimit);
-      console.log(`💾 Cached chat messages: ${cacheKey} (${messages.length} messages)`);
+      await cacheService.cacheChatMessages(chatGroupId, messages);
+      console.log(`💾 Cached chat messages: ${chatGroupId} (${messages.length} messages)`);
     }
 
     return result;
@@ -426,12 +459,6 @@ class MobileMessageService {
           feedbackRecord = feedback;
           console.log("✅ Feedback saved successfully:", feedback);
 
-          // Update chat group with feedback reference
-          const { error: updateError } = await supabase
-            .from("chat_group")
-            .update({ feedback_id: feedback.feedback_id })
-            .eq("chat_group_id", chatGroupId);
-
           if (updateError) {
             console.warn(
               "⚠️ Failed to link feedback to chat group:",
@@ -484,7 +511,6 @@ class MobileMessageService {
         created_at: chat.created_at,
         rating: chat.chat_feedback?.rating || null,
         feedback: chat.chat_feedback?.feedback_text || null,
-        duration_seconds: chat.chat_feedback?.chat_duration_seconds || null,
         message_count: chat.chat_feedback?.message_count || 0,
       }));
 

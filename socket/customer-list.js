@@ -155,11 +155,6 @@ async function handleChatQueued(io, chatGroupId, deptId) {
       null,
     );
 
-    console.log(
-      "📋 new_queued_chat payload:",
-      JSON.stringify(payload, null, 2),
-    );
-
     // Emit only to agents in the same department
     const departmentRoom = `department_${deptId}`;
 

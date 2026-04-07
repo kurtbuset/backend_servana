@@ -408,43 +408,6 @@ class ChatController {
       res.status(500).json({ error: "Failed to get room statistics" });
     }
   }
-  async handleSendMessage(rawMessage, io, socket) {
-    try {
-      // Validate message structure - must have either sys_user_id (agent) or client_id (client)
-      const isAgent = rawMessage.sys_user_id && !rawMessage.client_id;
-      const isClient = rawMessage.client_id && !rawMessage.sys_user_id;
-      
-      if (!isAgent && !isClient) {
-        throw new Error("Message must have either sys_user_id (agent) or client_id (client)");
-      }
-      
-      if (!rawMessage.chat_body || !rawMessage.chat_group_id) {
-        throw new Error("chat_body and chat_group_id are required");
-      }
-
-      // Prepare message for database insertion
-      const message = {
-        chat_body: rawMessage.chat_body,
-        chat_group_id: rawMessage.chat_group_id,
-        chat_created_at: new Date().toISOString(),
-        // Set either sys_user_id or client_id based on sender type
-        ...(isAgent && { sys_user_id: rawMessage.sys_user_id }),
-        ...(isClient && { client_id: rawMessage.client_id })
-      };
-
-      // Insert message into database
-      const insertedMessage = await chatService.insertMessage(message);
-
-      if (insertedMessage) {
-        return insertedMessage;
-      }
-
-      throw new Error("Failed to insert message into database");
-    } catch (err) {
-      console.error("❌ handleSendMessage error:", err.message);
-      throw err;
-    }
-  }
 }
 
 module.exports = new ChatController();
