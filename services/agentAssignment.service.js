@@ -1,9 +1,6 @@
 const supabase = require("../helpers/supabaseClient");
 const cacheService = require("./cache.service");
-const {
-  cacheManager,
-  default: redisClient,
-} = require("../helpers/redisClient");
+const { cacheManager } = require("../helpers/redisClient");
 const { USER_PRESENCE_STATUS, CHAT_STATUS } = require("../constants/statuses");
 
 class AgentAssignmentService {
@@ -15,24 +12,19 @@ class AgentAssignmentService {
 
   // --- Redis helpers ---
 
-  async getLastAssignedAgent(deptId) {
+  /**
+   * Atomically increment and return a round-robin counter for a department.
+   * INCR is a single atomic Redis command — no read-modify-write race condition.
+   */
+  async getRoundRobinCounter(deptId) {
     try {
-      const val = await redisClient.get(`${this.REDIS_KEY_PREFIX}${deptId}`);
-      return val ? parseInt(val, 10) : null;
+      if (!cacheManager.isConnected || !cacheManager.client) return null;
+      const key = `${this.REDIS_KEY_PREFIX}${deptId}`;
+      const count = await cacheManager.client.incr(key);
+      await cacheManager.client.expire(key, this.REDIS_TTL);
+      return count;
     } catch {
       return null;
-    }
-  }
-
-  async setLastAssignedAgent(deptId, agentId) {
-    try {
-      await redisClient.setex(
-        `${this.REDIS_KEY_PREFIX}${deptId}`,
-        this.REDIS_TTL,
-        String(agentId),
-      );
-    } catch (e) {
-      console.error("❌ Error setting last assigned agent:", e.message);
     }
   }
 
@@ -91,24 +83,20 @@ class AgentAssignmentService {
       if (candidates.length === 1) {
         selected = candidates[0];
       } else {
-        const lastAssigned = await this.getLastAssignedAgent(deptId);
-        const lastIdx = candidates.indexOf(lastAssigned);
-        selected = candidates[(lastIdx + 1) % candidates.length];
+        // Atomic INCR — no race condition between concurrent assignment calls
+        const counter = await this.getRoundRobinCounter(deptId);
+        const idx = counter !== null ? (counter - 1) % candidates.length : 0;
+        selected = candidates[idx];
       }
 
-      await this.setLastAssignedAgent(deptId, selected);
       console.log(
         `🔄 Round-robin → agent ${selected} for dept ${deptId} (workload: ${minWorkload})`,
       );
       return selected;
     } catch (e) {
       console.error("❌ selectNextAgent:", e.message);
-      // Fallback: simple round-robin
-      const last = await this.getLastAssignedAgent(deptId);
-      const idx = availableAgents.indexOf(last);
-      const selected = availableAgents[(idx + 1) % availableAgents.length];
-      await this.setLastAssignedAgent(deptId, selected);
-      return selected;
+      // Fallback: pick first available agent
+      return availableAgents[0];
     }
   }
 

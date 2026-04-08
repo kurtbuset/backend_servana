@@ -474,6 +474,7 @@ class MobileMessageService {
         chat_group_id: updatedGroup.chat_group_id,
         status: updatedGroup.status,
         resolved_at: updatedGroup.resolved_at,
+        agent_id: chatGroup.sys_user_id, // Include agent_id for socket notification
         feedback: feedbackRecord,
       };
     } catch (error) {

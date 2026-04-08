@@ -43,7 +43,7 @@ class SmsService {
         }
       );
 
-      console.log(`📱 SMS sent to ${phoneNumber}:`, response.data);
+      // console.log(`📱 SMS sent to ${phoneNumber}:`, response.data);
       return response.data;
     } catch (error) {
       const errorData = error.response?.data || error.message;

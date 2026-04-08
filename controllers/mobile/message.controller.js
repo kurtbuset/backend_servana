@@ -2,7 +2,7 @@ const express = require("express");
 const mobileMessageService = require("../../services/mobile/message.service");
 const getCurrentMobileUser = require("../../middleware/getCurrentMobileUser");
 const { parseDurationToSeconds } = require("../../utils/parseDuration");
-const { handleChatAssignment, handleChatQueued } = require("../../socket/customer-list");
+const { handleChatAssignment, handleChatQueued, handleChatResolvedByClient } = require("../../socket/customer-list");
 
 class MobileMessageController {
   getRouter() {
@@ -202,6 +202,11 @@ class MobileMessageController {
 
         io.to(`chat_${chatGroupId}`).emit("chat:resolved", eventData);
         console.log(`📱 Chat ${chatGroupId} ended by mobile client ${clientId}`);
+
+        // Remove chat from agent's customer list
+        if (result.agent_id) {
+          await handleChatResolvedByClient(io, chatGroupId, result.agent_id);
+        }
       }
 
       res.json({ data: {

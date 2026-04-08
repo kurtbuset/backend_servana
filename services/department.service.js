@@ -76,8 +76,9 @@ class DepartmentService {
       
       // Invalidate cache to ensure fresh data on next read
       await cacheService.invalidateDepartments();
+      await this.invalidateDepartmentMembersCache();
       console.log("🧹 Invalidated departments cache after creation");
-      
+
       return data;
     } catch (error) {
       console.error('❌ Error in createDepartment:', error.message);
@@ -102,8 +103,9 @@ class DepartmentService {
       
       // Invalidate cache to ensure fresh data on next read
       await cacheService.invalidateDepartments();
+      await this.invalidateDepartmentMembersCache();
       console.log("🧹 Invalidated departments cache after update");
-      
+
       return data;
     } catch (error) {
       console.error('❌ Error in updateDepartment:', error.message);
@@ -132,8 +134,9 @@ class DepartmentService {
       
       // Invalidate cache to ensure fresh data on next read
       await cacheService.invalidateDepartments();
+      await this.invalidateDepartmentMembersCache();
       console.log("🧹 Invalidated departments cache after status toggle");
-      
+
       return data;
     } catch (error) {
       console.error('❌ Error in toggleDepartmentStatus:', error.message);

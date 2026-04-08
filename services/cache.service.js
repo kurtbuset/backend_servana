@@ -29,6 +29,10 @@ class CacheService {
     return await this.cache.delete(prefix, userId);
   }
 
+  async invalidateUserDepartments(userId) {
+    return await this.cache.delete("USER_PROFILE", `user_depts_${userId}`);
+  }
+
   /**
    * DEPARTMENT CACHING (Write-Through with 4-hour TTL)
    */
@@ -172,7 +176,8 @@ class CacheService {
 
   async cacheUserChatGroups(userId, chatGroups) {
     const cacheKey = `user_chat_groups_${userId}`;
-    // Cache for 5 minutes (chat groups change frequently)
+    // 5-min TTL: per-user lists change on every assignment/transfer/resolve,
+    // so we use a shorter window than the 30-min default for static group data.
     return await this.cache.set("CHAT_GROUP", cacheKey, chatGroups, 300);
   }
 
@@ -188,7 +193,7 @@ class CacheService {
 
   async cacheResolvedUserChatGroups(userId, chatGroups) {
     const cacheKey = `user_resolved_chat_groups_${userId}`;
-    // Cache for 5 minutes
+    // 5-min TTL: same reasoning as cacheUserChatGroups — resolved list mutates often.
     return await this.cache.set("CHAT_GROUP", cacheKey, chatGroups, 300);
   }
 
