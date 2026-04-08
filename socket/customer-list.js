@@ -192,10 +192,60 @@ async function handleChatAccepted(io, chatGroupId, agentId) {
   }
 }
 
+/**
+ * Handle chat resolved by client
+ * Emits customerListUpdate with type 'chat_resolved_by_client' to remove from agent's list
+ */
+async function handleChatResolvedByClient(io, chatGroupId, agentId) {
+  try {
+    const chatGroupInfo = await getChatGroupInfo(chatGroupId);
+    if (!chatGroupInfo) return;
+
+    const clientInfo = await getClientInfo(chatGroupInfo.client_id);
+    if (!clientInfo) return;
+
+    const payload = {
+      type: "chat_resolved_by_client",
+      data: {
+        chat_group_id: chatGroupId,
+        agentId: agentId,
+        customer: {
+          chat_group_id: chatGroupId,
+          name: clientInfo.name,
+          number: clientInfo.client_number,
+        },
+      },
+      timestamp: new Date().toISOString(),
+    };
+
+    // Emit to the assigned agent to remove from their list
+    if (agentId) {
+      const agentRoom = `user_${agentId}`;
+      io.to(agentRoom).emit("customerListUpdate", payload);
+      console.log(
+        `📋 customerListUpdate: chat_resolved_by_client ${chatGroupId} removed from agent ${agentId} (room: ${agentRoom})`,
+      );
+    }
+
+    // Also emit to department room in case other agents have it in their view
+    if (chatGroupInfo.dept_id) {
+      const departmentRoom = `department_${chatGroupInfo.dept_id}`;
+      io.to(departmentRoom).emit("customerListUpdate", payload);
+      console.log(
+        `📋 customerListUpdate: chat_resolved_by_client ${chatGroupId} removed from dept ${chatGroupInfo.dept_id} (room: ${departmentRoom})`,
+      );
+    }
+
+  } catch (error) {
+    console.error("❌ Error handling chat resolved by client update:", error);
+  }
+}
+
 module.exports = {
   handleChatAssignment,
   handleChatQueued,
   handleChatAccepted,
+  handleChatResolvedByClient,
   getChatGroupInfo,
   getClientInfo,
 };

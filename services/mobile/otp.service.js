@@ -195,7 +195,8 @@ class OtpService {
     const otpHash = await this.hashOtp(otp);
     const expiresAt = this.getOtpExpiryTimestamp();
 
-    console.log('otp: ', otp)
+    // for development
+    // console.log('otp: ', otp)
     // 4. Store OTP
     await this.upsertOtp(
       phoneCountryCode,
@@ -206,8 +207,9 @@ class OtpService {
       clientId,
     );
 
-    // 5. Return metadata (OTP is delivered via SMS only — never returned to caller)
+    // 5. Return metadata including OTP for SMS delivery
     return {
+      otp,
       isNewUser,
       expiresIn: OTP_EXPIRY_MINUTES * 60,
     };

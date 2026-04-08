@@ -21,7 +21,7 @@ class AgentService {
       const cachedAgents = await cacheService.getAgents();
       
       if (cachedAgents !== null && cachedAgents !== undefined) {
-        // console.log(`✅ Cache HIT: Retrieved ${cachedAgents.length} agents from Redis cache`);
+        console.log('cache hit, fetching agents from redis')
         return cachedAgents;
       }
       
@@ -248,9 +248,10 @@ class AgentService {
    */
   async deleteUserDepartments(userId) {
     await supabase.from("sys_user_department").delete().eq("sys_user_id", userId);
-    
-    // Invalidate agents cache after department changes
+
+    // Invalidate agents cache and the per-user department list used by queue service
     await cacheService.invalidateAgents();
+    await cacheService.invalidateUserDepartments(userId);
     console.log("🧹 Invalidated agents cache after user departments deletion");
   }
 
@@ -279,9 +280,10 @@ class AgentService {
     const { error } = await supabase.from("sys_user_department").insert(insertRows);
 
     if (error) throw error;
-    
-    // Invalidate agents cache after department changes
+
+    // Invalidate agents cache and the per-user department list used by queue service
     await cacheService.invalidateAgents();
+    await cacheService.invalidateUserDepartments(userId);
     console.log("🧹 Invalidated agents cache after user departments insertion");
   }
 

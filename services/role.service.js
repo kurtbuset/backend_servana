@@ -59,9 +59,14 @@ class RoleService {
   }
 
   /**
-   * Get all roles with permissions
+   * Get all roles with permissions — cache-aside with 24-hour TTL
    */
   async getAllRoles() {
+    const cached = await cacheService.getRoles();
+    if (cached !== null && cached !== undefined) {
+      return cached;
+    }
+
     const { data, error } = await supabase
       .from("role")
       .select(
@@ -92,6 +97,7 @@ class RoleService {
         .filter(Boolean),
     }));
 
+    await cacheService.updateRoles(formatted);
     return formatted;
   }
 
