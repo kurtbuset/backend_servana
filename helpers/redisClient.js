@@ -55,26 +55,45 @@ class RedisCacheManager {
    */
   async connect() {
     try {
+      // Support both URL-based (Render) and host/port (local) configuration
+      const redisUrl = process.env.REDIS_URL;
       const host = process.env.REDIS_HOST || 'localhost';
       const port = process.env.REDIS_PORT || 6379;
       const password = process.env.REDIS_PASSWORD || undefined;
 
-      this.client = redis.createClient({
-        socket: {
-          host: host,
-          port: parseInt(port),
-          reconnectStrategy: (retries) => {
-            if (retries > 10) {
-              console.error('❌ Redis: max reconnection attempts reached');
-              return new Error('Max reconnection attempts reached');
+      const clientConfig = redisUrl 
+        ? {
+            url: redisUrl,
+            socket: {
+              reconnectStrategy: (retries) => {
+                if (retries > 10) {
+                  console.error('❌ Redis: max reconnection attempts reached');
+                  return new Error('Max reconnection attempts reached');
+                }
+                const delay = Math.min(retries * 100, 3000);
+                console.log(`🔄 Redis reconnecting in ${delay}ms (attempt ${retries})`);
+                return delay;
+              },
             }
-            const delay = Math.min(retries * 100, 3000);
-            console.log(`🔄 Redis reconnecting in ${delay}ms (attempt ${retries})`);
-            return delay;
-          },
-        },
-        ...(password && { password }),
-      });
+          }
+        : {
+            socket: {
+              host: host,
+              port: parseInt(port),
+              reconnectStrategy: (retries) => {
+                if (retries > 10) {
+                  console.error('❌ Redis: max reconnection attempts reached');
+                  return new Error('Max reconnection attempts reached');
+                }
+                const delay = Math.min(retries * 100, 3000);
+                console.log(`🔄 Redis reconnecting in ${delay}ms (attempt ${retries})`);
+                return delay;
+              },
+            },
+            ...(password && { password }),
+          };
+
+      this.client = redis.createClient(clientConfig);
 
       this.client.on('error', (err) => {
         console.error('❌ Redis client error:', err.message);
