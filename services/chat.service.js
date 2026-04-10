@@ -546,6 +546,99 @@ class ChatService {
   }
 
   /**
+   * Transfer chat group directly to a specific agent
+   */
+  async transferChatGroupToAgent(chatGroupId, agentId, userId) {
+    try {
+      // Verify the chat group exists and the caller is the assigned agent
+      const { data: chatGroup, error: fetchError } = await supabase
+        .from("chat_group")
+        .select("chat_group_id, dept_id, sys_user_id")
+        .eq("chat_group_id", chatGroupId)
+        .eq("sys_user_id", userId)
+        .single();
+
+      if (fetchError || !chatGroup) {
+        throw new Error(
+          "Chat group not found or you don't have permission to transfer it",
+        );
+      }
+
+      const fromDeptId = chatGroup.dept_id;
+      const fromAgentId = chatGroup.sys_user_id;
+      console.log('agentId: ', agentId)
+      // Fetch target agent's department from sys_user_department junction table
+      const { data: targetAgentDept, error: agentError } = await supabase
+        .from("sys_user_department")
+        .select("dept_id")
+        .eq("sys_user_id", agentId)
+        .limit(1)
+        .single();
+      
+      if (agentError || !targetAgentDept) {
+        throw new Error("Target agent not found or has no department assigned");
+      }
+
+      const toDeptId = targetAgentDept.dept_id;
+
+      // Log the transfer
+      const { error: logError } = await supabase
+        .from("chat_transfer_log")
+        .insert({
+          chat_group_id: chatGroupId,
+          from_agent_id: fromAgentId,
+          to_agent_id: agentId,
+          from_dept_id: fromDeptId,
+          to_dept_id: toDeptId,
+          transfer_type: "manual",
+          transferred_at: new Date().toISOString(),
+        });
+
+      if (logError) {
+        console.error("⚠️ Failed to log agent transfer:", logError.message);
+      }
+
+      // Directly assign to the target agent
+      const { error: updateError } = await supabase
+        .from("chat_group")
+        .update({
+          sys_user_id: agentId,
+          dept_id: toDeptId,
+          status: "active",
+        })
+        .eq("chat_group_id", chatGroupId);
+
+      if (updateError) throw updateError;
+
+      console.log(
+        `✅ Chat ${chatGroupId} transferred directly from agent ${fromAgentId} to agent ${agentId}`,
+      );
+
+      // Fetch the updated chat group
+      const { data: updatedChat, error: finalError } = await supabase
+        .from("chat_group")
+        .select("chat_group_id, dept_id, sys_user_id, status")
+        .eq("chat_group_id", chatGroupId)
+        .single();
+
+      if (finalError) throw finalError;
+
+      await cacheService.invalidateChatMessages(chatGroupId);
+      await cacheService.invalidateUserChatGroups(userId);
+      await cacheService.invalidateUserChatGroups(agentId);
+
+      return {
+        ...updatedChat,
+        from_dept_id: fromDeptId,
+        to_agent_id: agentId,
+      };
+    } catch (error) {
+      console.error("❌ Error transferring chat group to agent:", error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Resolve chat group (mark as resolved)
    */
   async resolveChatGroup(chatGroupId, userId, feedbackData = {}) {

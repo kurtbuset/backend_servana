@@ -33,10 +33,16 @@ class ChatController {
       (req, res) => this.getResolvedChatGroups(req, res)
     );
 
-    // Transfer chat group to another department - requires message viewing permission
-    router.post("/:chatGroupId/transfer", 
+    // Transfer chat group to another department - requires transfer permission
+    router.post("/:chatGroupId/transfer",
       checkPermission(PERMISSIONS.CAN_TRANSFER),
       (req, res) => this.transferChatGroup(req, res)
+    );
+
+    // Transfer chat group directly to a specific agent - requires transfer permission
+    router.post("/:chatGroupId/transfer-to-agent",
+      checkPermission(PERMISSIONS.CAN_TRANSFER),
+      (req, res) => this.transferChatGroupToAgent(req, res)
     );
 
     // Resolve chat group (mark as resolved) - requires end chat permission
@@ -247,6 +253,91 @@ class ChatController {
       }
 
       res.status(500).json({ error: "Failed to transfer chat" });
+    }
+  }
+
+  /**
+   * Transfer chat group directly to a specific agent
+   */
+  async transferChatGroupToAgent(req, res) {
+    try {
+      const { chatGroupId } = req.params;
+      const { agentId } = req.body;
+      const { userId } = req;
+
+      if (!chatGroupId || !agentId) {
+        return res.status(400).json({
+          error: "Chat group ID and agent ID are required"
+        });
+      }
+
+      const result = await chatService.transferChatGroupToAgent(chatGroupId, agentId, userId);
+
+      // Emit socket events for real-time updates
+      const io = req.app.get('io');
+      if (io) {
+        // Look up agent name for the transfer message using existing helper
+        const details = await chatService.getTransferDetails(
+          result.from_dept_id, result.dept_id, { assigned: true, agentId }
+        );
+
+        // Emit transfer message to chat room
+        io.to(`chat_${chatGroupId}`).emit('chatTransferred', {
+          chat_group_id: chatGroupId,
+          transfer_type: 'manual',
+          from_dept: details.fromDeptName,
+          to_dept: details.toDeptName,
+          to_agent: details.toAgentName,
+          assigned: true,
+          timestamp: new Date().toISOString()
+        });
+
+        // Emit customerListUpdate to the receiving agent
+        const chatGroupInfo = await getChatGroupInfo(chatGroupId);
+        if (chatGroupInfo) {
+          const clientInfo = await getClientInfo(chatGroupInfo.client_id);
+          if (clientInfo) {
+            const moveToTopPayload = {
+              type: 'move_to_top',
+              data: {
+                customer: {
+                  chat_group_id: chatGroupInfo.chat_group_id,
+                  name: clientInfo.name,
+                  number: clientInfo.client_number,
+                  profile: clientInfo.profile_image,
+                  status: chatGroupInfo.status,
+                  department: chatGroupInfo.department?.dept_name || "Unknown",
+                  sys_user_id: chatGroupInfo.sys_user_id,
+                  dept_id: chatGroupInfo.dept_id,
+                },
+              },
+              timestamp: new Date().toISOString(),
+            };
+
+            io.to(`agent_${agentId}`).emit('customerListUpdate', moveToTopPayload);
+          }
+        }
+      }
+
+      res.json({ data: {
+        success: true,
+        message: `Chat transferred directly to agent ${agentId}`,
+        chat_group_id: result.chat_group_id,
+        sys_user_id: result.sys_user_id,
+        dept_id: result.dept_id,
+        status: result.status,
+      }});
+    } catch (err) {
+      console.error("❌ Error transferring chat to agent:", err);
+
+      if (err.message === "Chat group not found or you don't have permission to transfer it") {
+        return res.status(404).json({ error: err.message });
+      }
+      if (err.message === "Target agent not found") {
+        return res.status(404).json({ error: err.message });
+      }
+
+      res.status(500).json({ error: "Failed to transfer chat to agent" });
     }
   }
 
