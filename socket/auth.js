@@ -32,10 +32,17 @@ function extractAccessTokenFromCookies(socket) {
  * Extract Bearer token from Authorization header (mobile clients)
  */
 function extractBearerToken(socket) {
+  // First, check socket.handshake.auth.token (Socket.IO native auth)
+  if (socket.handshake.auth && socket.handshake.auth.token) {
+    console.log('✅ Found token in socket.handshake.auth');
+    return socket.handshake.auth.token;
+  }
+
+  // Then check Authorization header
   const authHeader = socket.handshake.headers.authorization;
 
   if (!authHeader) {
-    throw new Error("No Authorization header found");
+    throw new Error("No Authorization header or auth token found");
   }
 
   if (!authHeader.startsWith("Bearer ")) {
@@ -50,6 +57,7 @@ function extractBearerToken(socket) {
     throw new Error("No token found in Authorization header");
   }
 
+  console.log('✅ Found token in Authorization header');
   return token;
 }
 
@@ -58,17 +66,29 @@ function extractBearerToken(socket) {
  */
 function detectClientType(socket) {
   const headers = socket.handshake.headers;
+  const auth = socket.handshake.auth;
+
+  // Check for JWT in socket.handshake.auth (Socket.IO native auth)
+  if (auth && auth.token) {
+    console.log('🔍 Detected mobile client (auth.token)');
+    return "mobile";
+  }
 
   // Check for JWT in Authorization header (mobile)
   if (headers.authorization && headers.authorization.startsWith("Bearer ")) {
+    console.log('🔍 Detected mobile client (Authorization header)');
     return "mobile";
   }
 
   // Check for cookies (web)
   if (headers.cookie && headers.cookie.includes("access_token")) {
+    console.log('🔍 Detected web client (cookie)');
     return "web";
   }
 
+  console.error('❌ No valid authentication method found');
+  console.error('Headers:', JSON.stringify(headers, null, 2));
+  console.error('Auth:', JSON.stringify(auth, null, 2));
   throw new Error("No valid authentication method found");
 }
 

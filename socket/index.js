@@ -80,35 +80,57 @@ function initializeSocket(server, allowedOrigins) {
       origin: (origin, callback) => {
         // Allow requests with no origin (mobile apps, React Native)
         if (!origin) {
-          console.log(
-            // "✅ Socket.IO: Allowing connection with no origin (mobile app)",
-          );
+          console.log("✅ Socket.IO: Allowing connection with no origin (mobile app)");
           return callback(null, true);
         }
 
-        // console.log(`🔍 Socket.IO: Checking origin: ${origin}`);
+        console.log(`🔍 Socket.IO: Checking origin: ${origin}`);
 
-        // Allow if origin is in allowed list
+        // Normalize origin by removing port if it's default (80 for http, 443 for https)
+        const normalizedOrigin = origin.replace(/:443$/, '').replace(/:80$/, '');
+        const normalizedAllowedOrigins = allowedOrigins.map(o => 
+          o ? o.replace(/:443$/, '').replace(/:80$/, '') : o
+        );
+
+        // Allow if origin matches (with or without port)
         if (allowedOrigins && allowedOrigins.includes(origin)) {
-          // console.log(`✅ Socket.IO: Origin ${origin} is in allowed list`);
+          console.log(`✅ Socket.IO: Origin ${origin} is in allowed list`);
+          return callback(null, true);
+        }
+
+        // Check normalized origins
+        if (normalizedAllowedOrigins.includes(normalizedOrigin)) {
+          console.log(`✅ Socket.IO: Normalized origin ${normalizedOrigin} is in allowed list`);
+          return callback(null, true);
+        }
+
+        // Allow same-origin requests (backend connecting to itself)
+        if (normalizedOrigin === 'https://backend-servana.onrender.com') {
+          console.log(`✅ Socket.IO: Allowing same-origin request: ${origin}`);
           return callback(null, true);
         }
 
         // Allow any origin starting with http://192.168 (common home networks)
         if (origin.startsWith("http://192.168")) {
-          // console.log(`✅ Socket.IO: Allowing 192.168.x.x network: ${origin}`);
+          console.log(`✅ Socket.IO: Allowing 192.168.x.x network: ${origin}`);
           return callback(null, true);
         }
 
         // Allow any origin starting with http://10. (Android emulator, corporate networks)
         if (origin.startsWith("http://10.")) {
-          // console.log(`✅ Socket.IO: Allowing 10.x.x.x network: ${origin}`);
+          console.log(`✅ Socket.IO: Allowing 10.x.x.x network: ${origin}`);
           return callback(null, true);
         }
 
         // Allow any origin starting with http://172. (Docker networks)
         if (origin.startsWith("http://172.")) {
-          // console.log(`✅ Socket.IO: Allowing 172.x.x.x network: ${origin}`);
+          console.log(`✅ Socket.IO: Allowing 172.x.x.x network: ${origin}`);
+          return callback(null, true);
+        }
+
+        // Allow mobile app schemes
+        if (origin.startsWith("capacitor://") || origin.startsWith("ionic://")) {
+          console.log(`✅ Socket.IO: Allowing mobile app origin: ${origin}`);
           return callback(null, true);
         }
 
@@ -117,9 +139,7 @@ function initializeSocket(server, allowedOrigins) {
           process.env.NODE_ENV === "development" ||
           process.env.NODE_ENV !== "production"
         ) {
-          console.log(
-            // `✅ Socket.IO: Allowing origin in development mode: ${origin}`,
-          );
+          console.log(`✅ Socket.IO: Allowing origin in development mode: ${origin}`);
           return callback(null, true);
         }
 
@@ -134,6 +154,8 @@ function initializeSocket(server, allowedOrigins) {
     // Increase ping timeout for mobile networks
     pingTimeout: 60000,
     pingInterval: 25000,
+    // Allow upgrades from polling to websocket
+    allowUpgrades: true,
   });
 
   // Use simplified auth middleware
