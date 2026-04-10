@@ -13,7 +13,7 @@ module.exports = {
     cookieOptions: {  
       httpOnly: true,
       secure: isProduction, // Only true in production
-      sameSite: isProduction ? "Strict" : "Lax",// Adjust based on your needs in development
+      sameSite: isProduction ? "None" : "Lax", // "None" required for cross-origin cookies in production
     },
   },
 };
