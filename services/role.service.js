@@ -132,6 +132,7 @@ class RoleService {
 
     if (roleError) throw roleError;
 
+    await cacheService.invalidateRoles();
     return roleData;
   }
 
