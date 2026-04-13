@@ -3,7 +3,12 @@ const supabase = require("../helpers/supabaseClient");
 // Middleware to attach only sys_user_id to req.userId
 const getCurrentUser = async (req, res, next) => {
   try {
-    const token = req.cookies.access_token;
+    // Get token from Authorization header
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') 
+      ? authHeader.split(' ')[1] 
+      : null;
+
     if (!token) return res.status(401).json({ error: "Not authenticated" });
 
     // Validate token

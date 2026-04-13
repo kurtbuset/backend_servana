@@ -3,33 +3,11 @@ const jwtUtils = require("../utils/jwt");
 
 /**
  * Simplified Socket Authentication Middleware
- * Handles both web (cookie) and mobile (JWT) authentication
+ * Handles both web (Authorization header) and mobile (JWT) authentication
  */
 
 /**
- * Extract access token from cookies (web clients)
- */
-function extractAccessTokenFromCookies(socket) {
-  const cookies = socket.handshake.headers.cookie;
-
-  if (!cookies) {
-    throw new Error("No cookies found in request");
-  }
-
-  const cookieArray = cookies.split(";");
-
-  for (const cookie of cookieArray) {
-    const [name, value] = cookie.trim().split("=");
-    if (name === "access_token") {
-      return decodeURIComponent(value);
-    }
-  }
-
-  throw new Error("Access token not found in cookies");
-}
-
-/**
- * Extract Bearer token from Authorization header (mobile clients)
+ * Extract Bearer token from Authorization header or socket auth
  */
 function extractBearerToken(socket) {
   // First, check socket.handshake.auth.token (Socket.IO native auth)
@@ -70,19 +48,31 @@ function detectClientType(socket) {
 
   // Check for JWT in socket.handshake.auth (Socket.IO native auth)
   if (auth && auth.token) {
-    console.log('🔍 Detected mobile client (auth.token)');
-    return "mobile";
+    // Try to decode to determine if it's a mobile client JWT
+    try {
+      const decoded = jwtUtils.verifyAccessToken(auth.token);
+      if (decoded.client_id) {
+        console.log('🔍 Detected mobile client (auth.token with client_id)');
+        return "mobile";
+      }
+    } catch (err) {
+      // Not a mobile JWT, might be Supabase token
+    }
   }
 
-  // Check for JWT in Authorization header (mobile)
+  // Check for JWT in Authorization header
   if (headers.authorization && headers.authorization.startsWith("Bearer ")) {
-    console.log('🔍 Detected mobile client (Authorization header)');
-    return "mobile";
-  }
-
-  // Check for cookies (web)
-  if (headers.cookie && headers.cookie.includes("access_token")) {
-    console.log('🔍 Detected web client (cookie)');
+    const token = headers.authorization.substring(7);
+    try {
+      const decoded = jwtUtils.verifyAccessToken(token);
+      if (decoded.client_id) {
+        console.log('🔍 Detected mobile client (Authorization header with client_id)');
+        return "mobile";
+      }
+    } catch (err) {
+      // Not a mobile JWT, assume web client with Supabase token
+    }
+    console.log('🔍 Detected web client (Authorization header)');
     return "web";
   }
 
@@ -96,7 +86,7 @@ function detectClientType(socket) {
  * Authenticate web client using Supabase token
  */
 async function authenticateWebClient(socket) {
-  const token = extractAccessTokenFromCookies(socket);
+  const token = extractBearerToken(socket);
 
   // Verify token with Supabase
   const { data: authData, error: authError } = await supabase.auth.getUser(

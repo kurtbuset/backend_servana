@@ -366,47 +366,6 @@ class ClientAccountService {
   }
 
   /**
-   * Create client without password (for passwordless auth)
-   */
-  async createClientWithoutPassword(phoneCountryCode, phoneNumber) {
-    const clientRoleId = await this.getClientRoleId();
-
-    const { data, error } = await supabase
-      .from("client")
-      .insert({
-        client_country_code: phoneCountryCode,
-        client_number: phoneNumber,
-        prof_id: null, // No profile yet
-        client_updated_at: new Date().toISOString(),
-        client_is_active: true,
-        role_id: clientRoleId,
-      })
-      .select(
-        `
-        *,
-        prof_id (
-          prof_id,
-          prof_firstname,
-          prof_middlename,
-          prof_lastname,
-          prof_address,
-          prof_date_of_birth,
-          prof_street_address,
-          prof_region_info,
-          prof_postal_code
-        )
-      `,
-      )
-      .single();
-
-    if (error || !data) {
-      throw new Error("Failed to create client");
-    }
-
-    return data;
-  }
-
-  /**
    * Get or create chat group
    */
   async getOrCreateChatGroup(clientId) {

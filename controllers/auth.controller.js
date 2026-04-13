@@ -76,18 +76,14 @@ class AuthController {
         }
       }
 
-      // Set secure cookies
-      res.cookie("access_token", session.access_token, this._cookieOptions(24 * 60 * 60 * 1000));
-      res.cookie("refresh_token", session.refresh_token, this._cookieOptions(30 * 24 * 60 * 60 * 1000));
-
-      if (sessionId) {
-        res.cookie("session_id", sessionId, this._cookieOptions(24 * 60 * 60 * 1000));
-      }
-
+      // Return tokens in response body for Authorization header usage
       res.json({
         data: {
           message: "Login successful",
           user: { sys_user_id: sysUser.sys_user_id, role_id: sysUser.role_id },
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+          session_id: sessionId,
         }
       });
     } catch (err) {
@@ -106,7 +102,11 @@ class AuthController {
    */
   async refreshToken(req, res) {
     try {
-      const refreshToken = req.cookies.refresh_token || req.body.refresh_token;
+      // Accept refresh token from Authorization header or request body
+      const authHeader = req.headers.authorization;
+      const refreshToken = authHeader?.startsWith('Bearer ') 
+        ? authHeader.split(' ')[1] 
+        : req.body.refresh_token;
 
       if (!refreshToken) {
         return res.status(401).json({ error: "No refresh token provided" });
@@ -119,12 +119,8 @@ class AuthController {
         return res.status(401).json({ error: "Token refresh failed" });
       }
 
-      // Update cookies with new tokens
-      res.cookie("access_token", session.access_token, this._cookieOptions(24 * 60 * 60 * 1000));
-      res.cookie("refresh_token", session.refresh_token, this._cookieOptions(30 * 24 * 60 * 60 * 1000));
-
       // Update session in cache if exists
-      const sessionId = req.cookies.session_id;
+      const sessionId = req.body.session_id;
       const cache = req.app.get('cache');
 
       if (cache && sessionId) {
@@ -139,15 +135,12 @@ class AuthController {
       res.json({
         data: {
           message: "Token refreshed successfully",
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
         }
       });
     } catch (err) {
       console.error("Token refresh error:", err.message);
-
-      // Clear invalid tokens
-      res.clearCookie("access_token");
-      res.clearCookie("refresh_token");
-
       res.status(401).json({ error: "Token refresh failed: " + err.message });
     }
   }
@@ -157,7 +150,11 @@ class AuthController {
    */
   async checkAuth(req, res) {
     try {
-      const token = req.cookies.access_token;
+      // Accept token from Authorization header
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.startsWith('Bearer ') 
+        ? authHeader.split(' ')[1] 
+        : null;
 
       if (!token) {
         return res.sendStatus(401);
@@ -175,7 +172,11 @@ class AuthController {
    */
   async getUserId(req, res) {
     try {
-      const token = req.cookies.access_token;
+      // Accept token from Authorization header
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.startsWith('Bearer ') 
+        ? authHeader.split(' ')[1] 
+        : null;
 
       if (!token) {
         return res.sendStatus(401);
@@ -200,7 +201,8 @@ class AuthController {
    */
   async checkSession(req, res) {
     try {
-      const sessionId = req.cookies.session_id;
+      // Accept session ID from query params or body
+      const sessionId = req.query.session_id || req.body.session_id;
       const cache = req.app.get('cache');
 
       if (!cache) {
@@ -238,9 +240,14 @@ class AuthController {
    */
   async logout(req, res) {
     try {
-      const sessionId = req.cookies.session_id;
+      const sessionId = req.body.session_id;
       const cache = req.app.get('cache');
-      const token = req.cookies.access_token;
+      
+      // Get token from Authorization header
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.startsWith('Bearer ') 
+        ? authHeader.split(' ')[1] 
+        : null;
 
       // Get user ID to update user presence
       let userId = null;
@@ -261,11 +268,6 @@ class AuthController {
           console.error('⚠️ Failed to delete session:', error.message);
         }
       }
-
-      // Clear cookies with the same options used when setting them
-      res.clearCookie("access_token", config.jwt.cookieOptions);
-      res.clearCookie("refresh_token", config.jwt.cookieOptions);
-      res.clearCookie("session_id", config.jwt.cookieOptions);
 
       res.json({ data: { message: "Logged out" } });
     } catch (error) {
