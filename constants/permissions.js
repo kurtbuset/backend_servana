@@ -12,12 +12,10 @@ const PERMISSIONS = {
   VIEW_DEPT: 'priv_can_view_dept',
   ADD_DEPT: 'priv_can_add_dept',
   EDIT_DEPT: 'priv_can_edit_dept',
-  MANAGE_DEPT: 'priv_can_manage_dept', // Legacy - kept for backward compatibility
   ASSIGN_DEPT: 'priv_can_assign_dept',
   
   // Role Management
   MANAGE_ROLE: 'priv_can_manage_role',
-  ASSIGN_ROLE: 'priv_can_assign_role', // Legacy - kept for backward compatibility
   VIEW_CHANGE_ROLES: 'priv_can_view_change_roles',
   EDIT_CHANGE_ROLES: 'priv_can_edit_change_roles',
   
@@ -32,14 +30,13 @@ const PERMISSIONS = {
   ADD_AUTO_REPLY: 'priv_can_add_auto_reply',
   EDIT_AUTO_REPLY: 'priv_can_edit_auto_reply',
   DELETE_AUTO_REPLY: 'priv_can_delete_auto_reply',
-  MANAGE_AUTO_REPLY: 'priv_can_manage_auto_reply', // Legacy - kept for backward compatibility
   
   // Canned Messages / Macros
   VIEW_MACROS: 'priv_can_view_macros',
   ADD_MACROS: 'priv_can_add_macros',
   EDIT_MACROS: 'priv_can_edit_macros',
   DELETE_MACROS: 'priv_can_delete_macros',
-  USE_CANNED_MESS: 'priv_can_use_canned_mess', // Legacy - kept for backward compatibility 
+  USE_CANNED_MESS: 'priv_can_use_canned_mess',
   
   // Manage Agents Permissions
   VIEW_MANAGE_AGENTS: 'priv_can_view_manage_agents',

@@ -13,8 +13,63 @@ class ChatService {
    */
   async getCannedMessagesByRole(roleId, userId = null) {
     try {
-      const messages = await cacheService.getCannedMessages(roleId, userId);
-      return messages;
+      // Try cache first (cache-aside pattern)
+      const cachedMessages = await cacheService.getCannedMessages(roleId, userId);
+      
+      if (cachedMessages !== null && cachedMessages !== undefined) {
+        console.log(`✅ Cache HIT: Retrieved canned messages for role ${roleId}`);
+        return cachedMessages;
+      }
+
+      console.log(`⚠️ Cache MISS: Fetching canned messages from database for role ${roleId}`);
+
+      // Cache miss - fetch from database
+      // Get user's departments if userId is provided
+      let userDepartments = [];
+      if (userId) {
+        const { data: userDepts, error: deptError } = await supabase
+          .from("sys_user_department")
+          .select("dept_id")
+          .eq("sys_user_id", userId);
+
+        if (!deptError && userDepts) {
+          userDepartments = userDepts.map(d => d.dept_id);
+        }
+      }
+
+      // Fetch canned messages for the role
+      const { data: messages, error: messagesError } = await supabase
+        .from("canned_message")
+        .select("canned_id, canned_message, canned_is_active, dept_id, role_id")
+        .eq("role_id", roleId)
+        .eq("canned_is_active", true) // Only active messages
+        .order("canned_message", { ascending: true });
+
+      if (messagesError) throw messagesError;
+
+      // Filter messages based on user's departments
+      let filteredMessages = messages || [];
+      
+      if (userId && userDepartments.length > 0) {
+        // Include messages that are either:
+        // 1. Not department-specific (dept_id is null)
+        // 2. Belong to one of the user's departments
+        filteredMessages = filteredMessages.filter(msg => 
+          msg.dept_id === null || userDepartments.includes(msg.dept_id)
+        );
+      } else if (userId) {
+        // User has no departments - only show non-department-specific messages
+        filteredMessages = filteredMessages.filter(msg => msg.dept_id === null);
+      }
+
+      // Format the response to match expected structure
+      const formattedMessages = filteredMessages.map(msg => msg.canned_message);
+
+      // Cache the result
+      await cacheService.setCannedMessages(roleId, formattedMessages, userId);
+      console.log(`✅ Cached ${formattedMessages.length} canned messages for role ${roleId}`);
+
+      return formattedMessages;
     } catch (error) {
       console.error("❌ Error fetching canned messages:", error.message);
       throw error;
@@ -200,7 +255,6 @@ class ChatService {
       // Try to get recent messages from cache first
       let cachedMessages = [];
       if (!before && safeLimit <= 50) {
-        console.log('chat messages fetching from cache...')
         cachedMessages = await cacheService.getChatMessages(chatGroupId);
 
         if (cachedMessages.length > 0) {
