@@ -8,6 +8,9 @@ function validateEnv() {
     'REACT_SERVICE_ROLE_KEY',
     'JWT_ACCESS_SECRET',
     'JWT_REFRESH_SECRET',
+    'VAPID_PUBLIC_KEY',
+    'VAPID_PRIVATE_KEY',
+    'VAPID_MAILTO',
   ];
 
   const missing = required.filter((key) => !process.env[key]?.trim());

@@ -482,7 +482,7 @@ class RedisCacheManager {
 
     try {
       const userPresences = await this.getHashAll('USER_PRESENCE', 'all');
-      console.log(`✅ Retrieved all user Presences (${Object.keys(userPresences || {}).length} users)`);
+      // console.log(`✅ Retrieved all user Presences (${Object.keys(userPresences || {}).length} users)`);
       return userPresences || {};
     } catch (error) {
       console.error('getAllUserPresence error:',  error.message);

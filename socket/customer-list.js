@@ -4,6 +4,7 @@
  */
 
 const supabase = require("../helpers/supabaseClient");
+const pushService = require("../services/push.service");
 
 /**
  * Get chat group information
@@ -130,6 +131,14 @@ async function handleChatAssignment(io, chatGroupId, agentId) {
     console.log(
       `📋 customerListUpdate: assigned chat ${chatGroupId} to agent ${agentId} (room: ${agentRoom})`,
     );
+
+    // Push notification so agent is notified even when tab is backgrounded
+    pushService.sendToUser(
+      agentId,
+      'New chat assigned',
+      `${clientInfo.name} needs help`,
+      { chatGroupId, url: `/chats?group=${chatGroupId}` }
+    ).catch((err) => console.error('❌ Push (assign) error:', err.message));
   } catch (error) {
     console.error("❌ Error handling chat assignment update:", error);
   }
@@ -187,6 +196,15 @@ async function handleChatAccepted(io, chatGroupId, agentId) {
     );
     io.emit("customerListUpdate", payload);
 
+    // Push so the accepting agent is notified when backgrounded
+    if (agentId) {
+      pushService.sendToUser(
+        agentId,
+        'Chat transferred to you',
+        `${clientInfo.name} has been assigned to you`,
+        { chatGroupId, url: `/chats?group=${chatGroupId}` }
+      ).catch((err) => console.error('❌ Push (transfer) error:', err.message));
+    }
   } catch (error) {
     console.error("❌ Error handling chat accepted update:", error);
   }

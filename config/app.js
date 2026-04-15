@@ -8,6 +8,11 @@ module.exports = {
     refreshSecret: process.env.JWT_REFRESH_SECRET,
     accessExpiry: "15m", // 15 minutes
     refreshExpiry: "7d", // 7 days
-    // Note: Cookie options removed - now using Authorization headers
+    cookieOptions: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      path: '/',
+    },
   },
 };

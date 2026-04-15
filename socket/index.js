@@ -84,7 +84,7 @@ function initializeSocket(server, allowedOrigins) {
           return callback(null, true);
         }
 
-        console.log(`🔍 Socket.IO: Checking origin: ${origin}`);
+        // console.log(`🔍 Socket.IO: Checking origin: ${origin}`);
 
         // Normalize origin by removing port if it's default (80 for http, 443 for https)
         const normalizedOrigin = origin.replace(/:443$/, '').replace(/:80$/, '');
@@ -94,7 +94,7 @@ function initializeSocket(server, allowedOrigins) {
 
         // Allow if origin matches (with or without port)
         if (allowedOrigins && allowedOrigins.includes(origin)) {
-          console.log(`✅ Socket.IO: Origin ${origin} is in allowed list`);
+          // console.log(`✅ Socket.IO: Origin ${origin} is in allowed list`);
           return callback(null, true);
         }
 
@@ -294,8 +294,6 @@ function initializeSocket(server, allowedOrigins) {
         const senderType = socket.user.userType;
 
         let recipientIsActive = false;
-
-        console.log(`senderType: ${senderType}`)
         
         if (senderType === "agent") {
           // Agent sent message - check if any client is in room
@@ -342,11 +340,14 @@ function initializeSocket(server, allowedOrigins) {
           timestamp: message.chat_created_at,
         });
 
-        // Emit customerListUpdate to move chat to top of list
+        // Emit customerListUpdate to move chat to top of list and show unread indicator
         const chatGroupInfo = await getChatGroupInfo(chat_group_id);
         if (chatGroupInfo && chatGroupInfo.sys_user_id) {
           const clientInfo = await getClientInfo(chatGroupInfo.client_id);
           if (clientInfo) {
+            // Determine if this is an unread message (client sent and agent not in room)
+            const isUnread = senderType === "client" && !recipientIsActive;
+            
             const moveToTopPayload = {
               type: 'move_to_top',
               data: {
@@ -359,6 +360,7 @@ function initializeSocket(server, allowedOrigins) {
                   department: chatGroupInfo.department?.dept_name || "Unknown",
                   sys_user_id: chatGroupInfo.sys_user_id,
                   dept_id: chatGroupInfo.dept_id,
+                  has_unread: isUnread, // Add unread indicator flag
                 },
               },
               timestamp: new Date().toISOString(),
@@ -452,7 +454,7 @@ function initializeSocket(server, allowedOrigins) {
     });
   });
 
-  console.log("Socket.IO server initialized");
+  // console.log("Socket.IO server initialized");
 
   // Add utility functions to io instance
   io.getStats = () => getConnectionStats(io);

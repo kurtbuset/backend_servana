@@ -4,7 +4,7 @@ const getCurrentUser = require("../middleware/getCurrentUser");
 const { checkPermission } = require("../middleware/checkPermission");
 const { PERMISSIONS } = require("../constants/permissions");
 const { formatChatGroups } = require("../utils/formatChatGroups");
-const { getProfileImages, getLatestMessageTimes } = require("../utils/messageHelpers");
+const { getProfileImages, getLatestMessageTimes, getUnreadMessageStatus } = require("../utils/messageHelpers");
 const { handleChatAccepted } = require("../socket/customer-list");
 
 class QueueController {
@@ -55,13 +55,14 @@ class QueueController {
 
       const chatGroupIds = groups.map((g) => g.chat_group_id);
 
-      // Get profile images and latest message times
-      const [imageMap, timeMap] = await Promise.all([
+      // Get profile images, latest message times, and unread status
+      const [imageMap, timeMap, unreadMap] = await Promise.all([
         getProfileImages(profIds),
         getLatestMessageTimes(chatGroupIds),
+        getUnreadMessageStatus(chatGroupIds),
       ]);
 
-      const sortedFormatted = formatChatGroups(groups, imageMap, timeMap);
+      const sortedFormatted = formatChatGroups(groups, imageMap, timeMap, unreadMap);
 
       res.json({ data: sortedFormatted });
     } catch (err) {
