@@ -76,14 +76,18 @@ class AuthController {
         }
       }
 
-      // Return tokens in response body for Authorization header usage
+      // Set refresh_token and session_id as httpOnly cookies
+      const cookieMaxAge = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
+      res.cookie('refresh_token', session.refresh_token, this._cookieOptions(cookieMaxAge));
+      if (sessionId) {
+        res.cookie('session_id', sessionId, this._cookieOptions(cookieMaxAge));
+      }
+
       res.json({
         data: {
           message: "Login successful",
           user: { sys_user_id: sysUser.sys_user_id, role_id: sysUser.role_id },
           access_token: session.access_token,
-          refresh_token: session.refresh_token,
-          session_id: sessionId,
         }
       });
     } catch (err) {
@@ -102,11 +106,8 @@ class AuthController {
    */
   async refreshToken(req, res) {
     try {
-      // Accept refresh token from Authorization header or request body
-      const authHeader = req.headers.authorization;
-      const refreshToken = authHeader?.startsWith('Bearer ') 
-        ? authHeader.split(' ')[1] 
-        : req.body.refresh_token;
+      // Read refresh token from httpOnly cookie
+      const refreshToken = req.cookies.refresh_token;
 
       if (!refreshToken) {
         return res.status(401).json({ error: "No refresh token provided" });
@@ -119,8 +120,8 @@ class AuthController {
         return res.status(401).json({ error: "Token refresh failed" });
       }
 
-      // Update session in cache if exists
-      const sessionId = req.body.session_id;
+      // Update session TTL in cache if exists
+      const sessionId = req.cookies.session_id;
       const cache = req.app.get('cache');
 
       if (cache && sessionId) {
@@ -132,11 +133,17 @@ class AuthController {
         }
       }
 
+      // Rotate refresh_token cookie (Supabase issues new one each refresh)
+      const cookieMaxAge = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
+      res.cookie('refresh_token', session.refresh_token, this._cookieOptions(cookieMaxAge));
+      if (sessionId) {
+        res.cookie('session_id', sessionId, this._cookieOptions(cookieMaxAge));
+      }
+
       res.json({
         data: {
           message: "Token refreshed successfully",
           access_token: session.access_token,
-          refresh_token: session.refresh_token,
         }
       });
     } catch (err) {
@@ -201,8 +208,8 @@ class AuthController {
    */
   async checkSession(req, res) {
     try {
-      // Accept session ID from query params or body
-      const sessionId = req.query.session_id || req.body.session_id;
+      // Accept session ID from cookie, query params, or body
+      const sessionId = req.cookies.session_id || req.query.session_id || req.body.session_id;
       const cache = req.app.get('cache');
 
       if (!cache) {
@@ -240,13 +247,14 @@ class AuthController {
    */
   async logout(req, res) {
     try {
-      const sessionId = req.body.session_id;
+      // Read session ID from httpOnly cookie
+      const sessionId = req.cookies.session_id;
       const cache = req.app.get('cache');
-      
+
       // Get token from Authorization header
       const authHeader = req.headers.authorization;
-      const token = authHeader?.startsWith('Bearer ') 
-        ? authHeader.split(' ')[1] 
+      const token = authHeader?.startsWith('Bearer ')
+        ? authHeader.split(' ')[1]
         : null;
 
       // Get user ID to update user presence
@@ -268,6 +276,16 @@ class AuthController {
           console.error('⚠️ Failed to delete session:', error.message);
         }
       }
+
+      // Clear httpOnly cookies
+      const clearOpts = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        path: '/',
+      };
+      res.clearCookie('refresh_token', clearOpts);
+      res.clearCookie('session_id', clearOpts);
 
       res.json({ data: { message: "Logged out" } });
     } catch (error) {
