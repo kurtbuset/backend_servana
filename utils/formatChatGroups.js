@@ -5,13 +5,14 @@
  * @param {Array} groups - Raw chat group rows from the database
  * @param {Object} imageMap - Map of prof_id → image URL
  * @param {Object} timeMap - Map of chat_group_id → latest message ISO timestamp
+ * @param {Object} unreadMap - Map of chat_group_id → boolean (has unread messages)
  * @param {Object} options
  * @param {string}  [options.status]      - Fixed status value (e.g., "active", "resolved"). If omitted, uses group.status.
  * @param {number}  [options.sysUserId]   - If provided, added as sys_user_id to each entry.
  * @param {boolean} [options.isAccepted]  - If provided, added as isAccepted to each customer object.
  * @returns {Array} Formatted and sorted chat group array (newest message first).
  */
-function formatChatGroups(groups, imageMap, timeMap, options = {}) {
+function formatChatGroups(groups, imageMap, timeMap, unreadMap = {}, options = {}) {
   const formatted = [];
 
   for (const group of groups) {
@@ -27,6 +28,8 @@ function formatChatGroups(groups, imageMap, timeMap, options = {}) {
       ? new Date(latestTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
       : new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
+    const hasUnread = unreadMap[group.chat_group_id] || false;
+
     const customer = {
       id: client.client_id,
       chat_group_id: group.chat_group_id,
@@ -35,6 +38,7 @@ function formatChatGroups(groups, imageMap, timeMap, options = {}) {
       profile: imageMap[client.prof_id] || null,
       time: displayTime,
       status: options.status !== undefined ? options.status : group.status,
+      has_unread: hasUnread,
     };
 
     if (options.isAccepted !== undefined) {

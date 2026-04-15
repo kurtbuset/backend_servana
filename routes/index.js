@@ -13,6 +13,7 @@ const clientAccountController = require('../controllers/mobile/clientAccount.con
 const otpController = require('../controllers/mobile/otp.controller');
 const mobileDepartmentController = require('../controllers/mobile/department.controller');
 const mobileMessageController = require('../controllers/mobile/message.controller');
+const pushController = require('../controllers/push.controller');
 async function setupRoutes(app) {
   // Auth routes
   app.use('/auth', authController.getRouter());
@@ -42,6 +43,9 @@ async function setupRoutes(app) {
   app.use('/clientAccount', clientAccountController.getRouter());
   app.use('/department', mobileDepartmentController.getRouter());
   app.use('/messages', mobileMessageController.getRouter());
+
+  // Push notification routes
+  app.use('/push', pushController.getRouter());
 }
 
 

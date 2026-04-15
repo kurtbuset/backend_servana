@@ -117,8 +117,6 @@ class ChatService {
         return cachedGroups;
       }
 
-      console.log('chat groups fetching from db...')
-
       // Cache miss - fetch from database
       const { data, error } = await supabase
         .from("chat_group")

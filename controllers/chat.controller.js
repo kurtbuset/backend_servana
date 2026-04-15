@@ -4,10 +4,11 @@ const getCurrentUser = require("../middleware/getCurrentUser");
 const { checkPermission } = require("../middleware/checkPermission");
 const { PERMISSIONS } = require("../constants/permissions");
 const { formatChatGroups } = require("../utils/formatChatGroups");
-const { getProfileImages, getLatestMessageTimes } = require("../utils/messageHelpers");
+const { getProfileImages, getLatestMessageTimes, getUnreadMessageStatus } = require("../utils/messageHelpers");
 const { CHAT_STATUS } = require("../constants/statuses");
 const { parseDurationToSeconds } = require("../utils/parseDuration");
 const { getChatGroupInfo, getClientInfo } = require("../socket/customer-list");
+const pushService = require("../services/push.service");
 
 class ChatController {
   getRouter() {
@@ -105,13 +106,14 @@ class ChatController {
         }
       });
 
-      // Get profile images and latest message times in parallel
-      const [imageMap, timeMap] = await Promise.all([
+      // Get profile images, latest message times, and unread status in parallel
+      const [imageMap, timeMap, unreadMap] = await Promise.all([
         profIds.length > 0 ? getProfileImages(profIds) : Promise.resolve({}),
         getLatestMessageTimes(chatGroupIds),
+        getUnreadMessageStatus(chatGroupIds),
       ]);
 
-      const sortedFormatted = formatChatGroups(groups, imageMap, timeMap, {
+      const sortedFormatted = formatChatGroups(groups, imageMap, timeMap, unreadMap, {
         status: CHAT_STATUS.ACTIVE,
         sysUserId: userId,
         isAccepted: true,
@@ -149,13 +151,14 @@ class ChatController {
         }
       });
 
-      // Get profile images and latest message times in parallel
-      const [imageMap, timeMap] = await Promise.all([
+      // Get profile images, latest message times, and unread status in parallel
+      const [imageMap, timeMap, unreadMap] = await Promise.all([
         profIds.length > 0 ? getProfileImages(profIds) : Promise.resolve({}),
         getLatestMessageTimes(chatGroupIds),
+        getUnreadMessageStatus(chatGroupIds),
       ]);
 
-      const sortedFormatted = formatChatGroups(groups, imageMap, timeMap, {
+      const sortedFormatted = formatChatGroups(groups, imageMap, timeMap, unreadMap, {
         status: CHAT_STATUS.RESOLVED,
         sysUserId: userId,
         isAccepted: true,
@@ -229,6 +232,14 @@ class ChatController {
             // Emit only to the assigned agent
             const agentRoom = `agent_${chatGroupInfo.sys_user_id}`;
             io.to(agentRoom).emit('customerListUpdate', moveToTopPayload);
+
+            // Push so agent is notified even when tab is backgrounded
+            pushService.sendToUser(
+              chatGroupInfo.sys_user_id,
+              'Chat transferred to you',
+              `${clientInfo.name} has been assigned to you`,
+              { chatGroupId: Number(chatGroupId), url: `/chats?group=${chatGroupId}` }
+            ).catch((err) => console.error('❌ Push (dept transfer) error:', err.message));
           }
         }
       }
@@ -315,6 +326,14 @@ class ChatController {
             };
 
             io.to(`agent_${agentId}`).emit('customerListUpdate', moveToTopPayload);
+
+            // Push so agent is notified even when tab is backgrounded
+            pushService.sendToUser(
+              agentId,
+              'Chat transferred to you',
+              `${clientInfo.name} has been assigned to you`,
+              { chatGroupId: Number(chatGroupId), url: `/chats?group=${chatGroupId}` }
+            ).catch((err) => console.error('❌ Push (agent transfer) error:', err.message));
           }
         }
       }

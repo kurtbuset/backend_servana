@@ -35,7 +35,7 @@ function extractBearerToken(socket) {
     throw new Error("No token found in Authorization header");
   }
 
-  console.log('✅ Found token in Authorization header');
+  // console.log('✅ Found token in Authorization header');
   return token;
 }
 

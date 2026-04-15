@@ -56,6 +56,49 @@ async function getLatestMessageTimes(chatGroupIds) {
 }
 
 /**
+ * Get unread message counts for chat groups
+ * Returns a map of chat_group_id -> boolean (true if has unread messages from client)
+ * Only checks active chat groups, not resolved ones
+ * Optimized with a single query using JOIN
+ */
+async function getUnreadMessageStatus(chatGroupIds) {
+  if (!chatGroupIds || chatGroupIds.length === 0) return {};
+
+  // Single optimized query: get unread messages only from active chat groups
+  // Uses implicit JOIN through foreign key relationship
+  const { data: unreadMessages, error } = await supabase
+    .from("chat")
+    .select(`
+      chat_group_id,
+      chat_group!inner(status)
+    `)
+    .in("chat_group_id", chatGroupIds)
+    .not("client_id", "is", null) // Only client messages
+    .is("chat_read_at", null) // Not read yet
+    .eq("chat_group.status", "active"); // Only active chat groups
+
+  if (error) throw error;
+
+  const unreadMap = {};
+  
+  // Initialize all chat groups as no unread
+  chatGroupIds.forEach(id => {
+    unreadMap[id] = false;
+  });
+
+  // Mark chat groups with unread messages
+  const processedGroups = new Set();
+  (unreadMessages || []).forEach((msg) => {
+    if (!processedGroups.has(msg.chat_group_id)) {
+      unreadMap[msg.chat_group_id] = true;
+      processedGroups.add(msg.chat_group_id);
+    }
+  });
+
+  return unreadMap;
+}
+
+/**
  * Determine the type of message sender
  */
 function determineSenderType(message, currentUserId) {
@@ -106,6 +149,7 @@ function getSenderImageOptimized(message) {
 module.exports = {
   getProfileImages,
   getLatestMessageTimes,
+  getUnreadMessageStatus,
   determineSenderType,
   getSenderName,
   getSenderImageOptimized,
