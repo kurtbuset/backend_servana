@@ -85,11 +85,6 @@ async function startServer() {
     const cache = await cacheManager.connect();
     if (cache) {
       app.set('cache', cache);
-
-      // Start cleanup job every 5 minutes
-      cacheCleanupInterval = setInterval(() => {
-        cache.cleanup();
-      }, 5 * 60 * 1000);
     } else {
       console.log('⚠️ Server starting without cache (Redis unavailable)');
     }
