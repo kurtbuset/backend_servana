@@ -1,4 +1,5 @@
 const redis = require('redis');
+const logger = require('./logger')
 
 /**
  * Centralized Redis Cache Manager
@@ -25,7 +26,6 @@ class RedisCacheManager {
       CANNED_MESSAGES: 'canned_messages:',
       ONLINE_USERS: 'online_users:',
       USER_PRESENCE: 'user_presence:',
-      TYPING: 'typing:',
       RATE_LIMIT: 'rate_limit:',
       SYSTEM_CONFIG: 'system_config:'
     };
@@ -36,7 +36,7 @@ class RedisCacheManager {
       USER_PROFILE: 60 * 60,           // 1 hour
       CHAT_MESSAGES: 2 * 60 * 60,      // 2 hours
       CHAT_GROUP: 30 * 60,             // 30 minutes
-      DEPARTMENT: 4 * 60 * 60,         // 4 hours (write-through cache strategy)
+      DEPARTMENT: 4 * 60 * 60,         // 4 hours 
       ROLE: 24 * 60 * 60,              // 24 hours (rarely changes)
       AGENT: 2 * 60 * 60,              // 2 hours (moderate change frequency)
       AUTO_REPLY: 2 * 60 * 60,         // 2 hours (moderate change frequency)
@@ -44,7 +44,6 @@ class RedisCacheManager {
       CANNED_MESSAGES: 60 * 60,        // 1 hour
       ONLINE_USERS: 60,                // 1 minute (real-time data)
       USER_PRESENCE: 15 * 60,           // 15 minutes (auto-expire if no heartbeat)
-      TYPING: 10,                      // 10 seconds (typing indicators)
       RATE_LIMIT: 60 * 60,             // 1 hour
       SYSTEM_CONFIG: 12 * 60 * 60      // 12 hours
     };
@@ -149,11 +148,11 @@ class RedisCacheManager {
       const data = await this.client.get(key);
       
       if (data) {
-        // console.log(`✅ Cache HIT: ${key}`);
+        console.log(`✅ Cache HIT: ${key}`);
         return JSON.parse(data);
       }
       
-      // console.log(`⚠️ Cache MISS: ${key}`);
+      console.log(`⚠️ Cache MISS: ${key}`);
       return null;
     } catch (error) {
       console.error(`❌ Cache GET error for ${prefix}:`, error.message);
@@ -214,43 +213,8 @@ class RedisCacheManager {
   }
 
   /**
-   * WRITE-THROUGH OPERATIONS
-   * For critical data that must stay consistent
-   */
-
-  // Write-through set (cache + database)
-  async setWriteThrough(prefix, identifier, data, dbUpdateFn, customTTL = null, subKey = null) {
-    if (!this.isConnected) {
-      // If cache unavailable, still update database
-      try {
-        await dbUpdateFn(data);
-        return true;
-      } catch (error) {
-        console.error(`❌ Database update failed for ${prefix}:`, error.message);
-        return false;
-      }
-    }
-
-    try {
-      // Update database first
-      await dbUpdateFn(data);
-      
-      // Then update cache
-      const key = this.generateKey(prefix, identifier, subKey);
-      const ttl = customTTL || this.ttlPolicies[prefix];
-      
-      await this.client.setEx(key, ttl, JSON.stringify(data));
-      console.log(`✅ Write-through SET: ${key} (TTL: ${ttl}s)`);
-      return true;
-    } catch (error) {
-      console.error(`❌ Write-through error for ${prefix}:`, error.message);
-      return false;
-    }
-  }
-
-  /**
    * SET OPERATIONS
-   * For managing collections (online users, user sessions, etc.)
+   * For managing collections (for user sessions)
    */
 
   // Add to set
@@ -430,6 +394,7 @@ class RedisCacheManager {
   /**
    * USER PRESENCE MANAGEMENT
    * Handles 3-state agent status: accepting_chats, not_accepting_chats, offline
+   * Uses individual keys per user for independent TTL management
    */
 
   async setUserPresence(userId, userPresenceData) {
@@ -441,7 +406,7 @@ class RedisCacheManager {
       // Validate agent status
       const validStatuses = ['accepting_chats', 'not_accepting_chats', 'offline'];
       if (!validStatuses.includes(userPresence)) {
-        console.error(`❌ Invalid user presence: ${userPresence}`);
+        logger.presence.warn('setUserPresence rejected — invalid status', { userId, userPresence });
         return false;
       }
 
@@ -455,11 +420,13 @@ class RedisCacheManager {
         deptIds: deptIds || [],
       };
 
-      // Store in hash for efficient retrieval of all agent statuses
-      await this.setHashField('USER_PRESENCE', 'all', userId.toString(), statusData, 15 * 60);
+      // Store in individual key with independent TTL (15 minutes)
+      await this.set('USER_PRESENCE', userId.toString(), statusData, 15 * 60);
+      
+      logger.presence.debug('setUserPresence success', { userId, userPresence });
       return true;
     } catch (error) {
-      console.error('❌ setAgentStatus error:', error.message);
+      logger.presence.error('setUserPresence failed', { userId, error: error.message });
       return false;
     }
   }
@@ -468,11 +435,10 @@ class RedisCacheManager {
     if (!this.isConnected) return null;
 
     try {
-      const presence = await this.getHashField('USER_PRESENCE', 'all', userId.toString());
-      
+      const presence = await this.get('USER_PRESENCE', userId.toString());
       return presence;
     } catch (error) {
-      console.error('❌ setUserPresence error:', error.message);
+      logger.presence.error('getUserPresence failed', { userId, error: error.message });
       return null;
     }
   }
@@ -481,11 +447,44 @@ class RedisCacheManager {
     if (!this.isConnected) return {};
 
     try {
-      const userPresences = await this.getHashAll('USER_PRESENCE', 'all');
-      // console.log(`✅ Retrieved all user Presences (${Object.keys(userPresences || {}).length} users)`);
-      return userPresences || {};
+      // Get all user presence keys using pattern matching
+      const pattern = `${this.keyPrefixes.USER_PRESENCE}*`;
+      const keys = await this.client.keys(pattern);
+      
+      if (keys.length === 0) {
+        logger.presence.debug('getAllUserPresence — no users found');
+        return {};
+      }
+
+      // Fetch all presence data
+      const presencePromises = keys.map(async (key) => {
+        try {
+          const data = await this.client.get(key);
+          return data ? JSON.parse(data) : null;
+        } catch (error) {
+          logger.presence.warn('Failed to parse presence data', { key, error: error.message });
+          return null;
+        }
+      });
+
+      const presenceDataArray = await Promise.all(presencePromises);
+      
+      // Filter to only return users with accepting_chats status
+      const acceptingChatsUsers = {};
+      for (const presence of presenceDataArray) {
+        if (presence && presence.userPresence === 'accepting_chats') {
+          acceptingChatsUsers[presence.userId.toString()] = presence;
+        }
+      }
+      
+      logger.presence.debug('getAllUserPresence success', { 
+        total: keys.length, 
+        acceptingChats: Object.keys(acceptingChatsUsers).length 
+      });
+      
+      return acceptingChatsUsers;
     } catch (error) {
-      console.error('getAllUserPresence error:',  error.message);
+      logger.presence.error('getAllUserPresence failed', { error: error.message });
       return {};
     }
   }
@@ -494,11 +493,17 @@ class RedisCacheManager {
     if (!this.isConnected) return false;
 
     try {
-      const key = this.generateKey('USER_PRESENCE', 'all');
-      await this.client.hDel(key, userId.toString());
-      return true;
+      const result = await this.delete('USER_PRESENCE', userId.toString());
+      
+      if (result) {
+        logger.presence.info('removeUserPresence success', { userId });
+      } else {
+        logger.presence.warn('removeUserPresence — key not found', { userId });
+      }
+      
+      return result;
     } catch (error) {
-      console.error('removeAgentStatus error:', error.message);
+      logger.presence.error('removeUserPresence failed', { userId, error: error.message });
       return false;
     }
   }
@@ -508,66 +513,19 @@ class RedisCacheManager {
 
     try {
       const userPresence = await this.getUserPresence(userId);
-      
+
       if (userPresence) {
         userPresence.lastSeen = new Date();
         await this.setUserPresence(userId, userPresence);
+        logger.presence.debug('heartbeat updated', { userId, lastSeen: userPresence.lastSeen });
         return true;
       }
-      
+
+      logger.presence.warn('heartbeat — no presence entry found', { userId });
       return false;
     } catch (error) {
-      console.error('❌ updateAgentHeartbeat error:', error.message);
+      logger.presence.error('updateUserHeartbeat failed', { userId, error: error.message });
       return false;
-    }
-  }
-
-  // Chat message caching
-  async cacheRecentMessages(chatGroupId, messages, limit = 50) {
-    const recentMessages = messages.slice(-limit);
-    await this.set('CHAT_MESSAGES', chatGroupId, recentMessages);
-  }
-
-  async getRecentMessages(chatGroupId) {
-    return await this.get('CHAT_MESSAGES', chatGroupId) || [];
-  }
-
-  // Department/Role caching (write-through)
-  async cacheDepartments(departments, dbUpdateFn = null) {
-    if (dbUpdateFn) {
-      return await this.setWriteThrough('DEPARTMENT', 'all', departments, dbUpdateFn);
-    } else {
-      return await this.set('DEPARTMENT', 'all', departments);
-    }
-  }
-
-  async getCachedDepartments() {
-    return await this.get('DEPARTMENT', 'all');
-  }
-
-  // Rate limiting
-  async checkRateLimit(identifier, limit, windowSeconds) {
-    if (!this.isConnected) {
-      // Fail closed: deny when Redis is unavailable to prevent rate limit bypass
-      console.warn('⚠️  Rate limit check skipped — Redis unavailable, denying request');
-      return false;
-    }
-    
-    try {
-      const key = this.generateKey('RATE_LIMIT', identifier);
-      const current = await this.client.incr(key);
-      
-      if (current === 1) {
-        await this.client.expire(key, windowSeconds);
-      }
-      
-      const allowed = current <= limit;
-      console.log(`🚦 Rate limit check: ${identifier} (${current}/${limit}) - ${allowed ? 'ALLOWED' : 'BLOCKED'}`);
-      
-      return allowed;
-    } catch (error) {
-      console.error(`❌ Rate limit error:`, error.message);
-      return false; // Fail closed: deny on error
     }
   }
 
@@ -580,10 +538,64 @@ class RedisCacheManager {
       const typingKeys = await this.client.keys(this.generateKey('TYPING', '*'));
       if (typingKeys.length > 0) {
         await this.client.del(typingKeys);
-        console.log(`🧹 Cleaned ${typingKeys.length} expired typing indicators`);
+        logger.cache.info('Cleaned expired typing indicators', { count: typingKeys.length });
       }
     } catch (error) {
-      console.error('❌ Cleanup error:', error.message);
+      logger.cache.error('Cleanup error', { error: error.message });
+    }
+  }
+
+  /**
+   * Clean stale user presence entries
+   * Removes users who haven't sent heartbeat in specified minutes
+   */
+  async cleanupStalePresence(staleThresholdMinutes = 15) {
+    if (!this.isConnected) return { removed: 0, errors: 0 };
+
+    try {
+      const pattern = `${this.keyPrefixes.USER_PRESENCE}*`;
+      const keys = await this.client.keys(pattern);
+      
+      if (keys.length === 0) {
+        return { removed: 0, errors: 0 };
+      }
+
+      const now = new Date();
+      const staleThreshold = staleThresholdMinutes * 60 * 1000;
+      let removed = 0;
+      let errors = 0;
+
+      for (const key of keys) {
+        try {
+          const data = await this.client.get(key);
+          if (!data) continue;
+
+          const presence = JSON.parse(data);
+          const lastSeen = new Date(presence.lastSeen);
+          const inactiveTime = now - lastSeen;
+
+          if (inactiveTime > staleThreshold) {
+            await this.client.del(key);
+            removed++;
+            logger.cache.info('Removed stale presence', {
+              userId: presence.userId,
+              inactiveMinutes: Math.floor(inactiveTime / 60000),
+            });
+          }
+        } catch (error) {
+          errors++;
+          logger.cache.warn('Failed to process presence key', { key, error: error.message });
+        }
+      }
+
+      if (removed > 0) {
+        logger.cache.info('Stale presence cleanup completed', { removed, errors, total: keys.length });
+      }
+
+      return { removed, errors };
+    } catch (error) {
+      logger.cache.error('Stale presence cleanup failed', { error: error.message });
+      return { removed: 0, errors: 1 };
     }
   }
 
@@ -624,13 +636,7 @@ class RedisCacheManager {
 // Create singleton instance
 const cacheManager = new RedisCacheManager();
 
-// Legacy compatibility function
-async function connectRedis() {
-  return await cacheManager.connect();
-}
-
 module.exports = { 
-  connectRedis,
   RedisCacheManager,
   cacheManager
 };                              

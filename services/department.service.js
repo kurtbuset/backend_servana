@@ -3,7 +3,7 @@ const cacheService = require("./cache.service");
 
 class DepartmentService {
   /**
-   * Get all departments - Redis caching with 4-hour TTL and write-through strategy
+   * Get all departments - Redis caching with 4-hour TTL
    * Cache-first approach: if cache found, return cache data; if not, use business logic for data fetching
    * Only returns active departments (dept_is_active = true)
    */
@@ -31,7 +31,6 @@ class DepartmentService {
       // Cache the result for future requests with 4-hour TTL
       if (data) {
         await cacheService.updateDepartments(data);
-        // console.log(`✅ Cached ${data.length} departments with 4-hour TTL using write-through strategy`);
       }
       
       return data || [];
@@ -55,11 +54,10 @@ class DepartmentService {
   }
 
   /**
-   * Create a new department - Write-through caching
+   * Create a new department
    */
   async createDepartment(deptName, createdBy) {
     try {
-      // Write-through: Create in database first
       const { data, error } = await supabase
         .from("department")
         .insert([
@@ -87,11 +85,10 @@ class DepartmentService {
   }
 
   /**
-   * Update a department - Write-through caching
+   * Update a department 
    */
   async updateDepartment(deptId, updateData) {
     try {
-      // Write-through: Update database first
       const { data, error } = await supabase
         .from("department")
         .update(updateData)
@@ -114,11 +111,10 @@ class DepartmentService {
   }
 
   /**
-   * Toggle department active status - Write-through caching
+   * Toggle department active status
    */
   async toggleDepartmentStatus(deptId, isActive, updatedBy) {
     try {
-      // Write-through: Update database first
       const { data, error } = await supabase
         .from("department")
         .update({

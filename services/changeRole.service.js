@@ -71,7 +71,6 @@ class ChangeRoleService {
 
       // Cache the result for future requests with 1-hour TTL
       await cacheService.updateUsersWithRoles(response);
-      // console.log(`✅ Cached ${response.length} users with roles with 1-hour TTL using write-through strategy`);
 
       return response;
     } catch (error) {
@@ -118,7 +117,6 @@ class ChangeRoleService {
       // Cache the result for future requests with 24-hour TTL
       if (data) {
         await cacheService.updateRoles(data);
-        // console.log(`✅ Cached ${data.length} roles with 24-hour TTL using write-through strategy`);
       }
       
       return data || [];
@@ -141,7 +139,7 @@ class ChangeRoleService {
   }
 
   /**
-   * Update user's role or active status - Write-through caching
+   * Update user's role or active status
    */
   async updateUserRole(userId, roleId, isActive, updatedBy) {
     try {

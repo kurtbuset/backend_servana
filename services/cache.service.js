@@ -34,7 +34,7 @@ class CacheService {
   }
 
   /**
-   * DEPARTMENT CACHING (Write-Through with 4-hour TTL)
+   * DEPARTMENT CACHING (Cache-Aside)
    */
 
   async getDepartments() {
@@ -49,7 +49,6 @@ class CacheService {
   }
 
   async updateDepartments(departments) {
-    // Write-through: Cache the departments with 4-hour TTL
     return await this.cache.set("DEPARTMENT", "all", departments);
   }
 
@@ -58,7 +57,7 @@ class CacheService {
   }
 
   /**
-   * ROLE CACHING (Write-Through)
+   * ROLE CACHING (Cache-Aside)
    */
 
   async getRoles() {
@@ -97,7 +96,7 @@ class CacheService {
   }
 
   /**
-   * AUTO-REPLY CACHING (Write-Through with 2-hour TTL)
+   * AUTO-REPLY CACHING (Cache-Aside)
    */
 
   async getAutoReplies() {
@@ -113,7 +112,7 @@ class CacheService {
   }
 
   /**
-   * AGENT CACHING (Write-Through with 2-hour TTL)
+   * AGENT CACHING (Cache-Aside)
    */
 
   async getAgents() {
@@ -129,7 +128,7 @@ class CacheService {
   }
 
   /**
-   * CHANGE-ROLE CACHING (Write-Through with 1-hour TTL)
+   * CHANGE-ROLE CACHING (Cache-Aside)
    */
 
   async getUsersWithRoles() {
@@ -228,14 +227,6 @@ class CacheService {
   }
 
   /**
-   * RATE LIMITING
-   */
-
-  async checkRateLimit(identifier, limit = 100, windowSeconds = 3600) {
-    return await this.cache.checkRateLimit(identifier, limit, windowSeconds);
-  }
-
-  /**
    * SYSTEM CONFIGURATION (Write-Through)
    */
 
@@ -260,15 +251,6 @@ class CacheService {
     await Promise.all(promises);
   }
 
-  async invalidateAllDepartmentData() {
-    const promises = [
-      this.invalidateDepartments(),
-      this.cache.delete("CANNED_MESSAGES", "*"), // Would need pattern delete
-    ];
-
-    await Promise.all(promises);
-  }
-
   /**
    * CACHE STATISTICS AND HEALTH
    */
@@ -279,10 +261,6 @@ class CacheService {
 
   async healthCheck() {
     return await this.cache.healthCheck();
-  }
-
-  async cleanup() {
-    return await this.cache.cleanup();
   }
 }
 
