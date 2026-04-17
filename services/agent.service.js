@@ -127,7 +127,6 @@ class AgentService {
 
       // Cache the result for future requests with 2-hour TTL
       await cacheService.updateAgents(formattedAgents);
-      // console.log(`✅ Cached ${formattedAgents.length} agents with 2-hour TTL using write-through strategy`);
 
       return formattedAgents;
     } catch (error) {
@@ -224,7 +223,7 @@ class AgentService {
   }
 
   /**
-   * Update system user - Write-through caching
+   * Update system user
    */
   async updateSystemUser(userId, email, isActive) {
     const { error } = await supabase
@@ -244,7 +243,7 @@ class AgentService {
   }
 
   /**
-   * Delete user departments - Write-through caching
+   * Delete user departments
    */
   async deleteUserDepartments(userId) {
     await supabase.from("sys_user_department").delete().eq("sys_user_id", userId);
@@ -269,7 +268,7 @@ class AgentService {
   }
 
   /**
-   * Insert user departments - Write-through caching
+   * Insert user departments
    */
   async insertUserDepartments(userId, departmentIds) {
     const insertRows = departmentIds.map((deptId) => ({

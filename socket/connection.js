@@ -10,6 +10,7 @@ const { handleChatAssignment } = require("./customer-list");
 const supabase = require("../helpers/supabaseClient");
 const queueService = require("../services/queue.service");
 const { joinDepartmentRooms } = require("./room-management");
+const logger = require('../helpers/logger')
 
 /**
  * Set presence in Redis and broadcast to all clients.
@@ -254,12 +255,44 @@ function setupPresenceHandlers(socket, io) {
  */
 function setupDisconnectHandler(socket, io) {
   socket.on("disconnect", async (reason) => {
-    // Update user presence to offline
+    logger.socket.info("socket disconnected", {
+      userId: socket.user?.userId,
+      userType: socket.user?.userType,
+      socketId: socket.id,
+      reason,
+    });
+
+    // Remove user presence from Redis on disconnect
     if (
       socket.user?.userId &&
       (socket.user?.userType === "agent" || socket.user?.userType === "admin")
     ) {
-      await updateUserPresence(socket, USER_PRESENCE_STATUS.OFFLINE, io);
+      try {
+        // Remove from Redis immediately (don't wait for TTL)
+        await cacheManager.removeUserPresence(socket.user.userId);
+        
+        // Broadcast offline status
+        io.emit("presence:change", {
+          userId: socket.user.userId,
+          userType: socket.user.userType,
+          status: USER_PRESENCE_STATUS.OFFLINE,
+          firstName: socket.user?.firstName,
+          lastName: socket.user?.lastName,
+          deptIds: [],
+          timestamp: new Date().toISOString(),
+          reason: 'disconnect',
+        });
+        
+        logger.socket.info("presence removed on disconnect", {
+          userId: socket.user.userId,
+          reason,
+        });
+      } catch (error) {
+        logger.socket.error("failed to remove presence on disconnect", {
+          userId: socket.user.userId,
+          error: error.message,
+        });
+      }
     }
 
     // Leave all rooms
@@ -275,8 +308,8 @@ function setupDisconnectHandler(socket, io) {
         (room) => room !== socket.id,
       );
       if (userRooms.length > 0) {
-        console.log(
-          `📍 Socket ${socket.id} was in rooms: [${userRooms.join(", ")}] before disconnect`,
+        logger.socket.debug(
+          `Socket ${socket.id} was in rooms: [${userRooms.join(", ")}] before disconnect`,
         );
       }
     }

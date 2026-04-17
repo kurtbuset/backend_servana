@@ -1,4 +1,5 @@
 const redis = require('redis');
+const logger = require('./logger')
 
 /**
  * Centralized Redis Cache Manager
@@ -35,7 +36,7 @@ class RedisCacheManager {
       USER_PROFILE: 60 * 60,           // 1 hour
       CHAT_MESSAGES: 2 * 60 * 60,      // 2 hours
       CHAT_GROUP: 30 * 60,             // 30 minutes
-      DEPARTMENT: 4 * 60 * 60,         // 4 hours (write-through cache strategy)
+      DEPARTMENT: 4 * 60 * 60,         // 4 hours 
       ROLE: 24 * 60 * 60,              // 24 hours (rarely changes)
       AGENT: 2 * 60 * 60,              // 2 hours (moderate change frequency)
       AUTO_REPLY: 2 * 60 * 60,         // 2 hours (moderate change frequency)
@@ -147,11 +148,11 @@ class RedisCacheManager {
       const data = await this.client.get(key);
       
       if (data) {
-        // console.log(`✅ Cache HIT: ${key}`);
+        console.log(`✅ Cache HIT: ${key}`);
         return JSON.parse(data);
       }
       
-      // console.log(`⚠️ Cache MISS: ${key}`);
+      console.log(`⚠️ Cache MISS: ${key}`);
       return null;
     } catch (error) {
       console.error(`❌ Cache GET error for ${prefix}:`, error.message);
@@ -635,13 +636,7 @@ class RedisCacheManager {
 // Create singleton instance
 const cacheManager = new RedisCacheManager();
 
-// Legacy compatibility function
-async function connectRedis() {
-  return await cacheManager.connect();
-}
-
 module.exports = { 
-  connectRedis,
   RedisCacheManager,
   cacheManager
 };                              
