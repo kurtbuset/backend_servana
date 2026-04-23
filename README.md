@@ -22,7 +22,7 @@ npm test
 
 - **Framework:** Express.js
 - **Database:** Supabase (PostgreSQL)
-- **Cache:** Redis (optional)
+- **Cache:** Redis
 - **Real-time:** Socket.IO
 - **Auth:** JWT + Supabase Auth
 
@@ -76,11 +76,12 @@ Required:
 - `REACT_SERVICE_ROLE_KEY` - Supabase service key
 - `JWT_ACCESS_SECRET` - JWT signing secret
 - `JWT_REFRESH_SECRET` - Refresh token secret
+- `REDIS_URL` - Redis connection URL (cloud) OR
+- `REDIS_HOST`, `REDIS_PORT` - Redis config (local)
 
 Optional:
 
 - `PORT` - Server port (default: 5000)
-- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` - Redis config
 - `NODE_ENV` - Environment mode
 
 ## Docker
