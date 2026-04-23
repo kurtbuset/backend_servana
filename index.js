@@ -36,11 +36,6 @@ app.use(globalLimiter);
 // ===========================
 // Routes
 // ===========================
-// Root endpoint
-app.get("/", (req, res) => {
-  res.status(200).json({ status: "Server is running!" });
-});
-
 setupRoutes(app);
 
 // Global error handler — catches unhandled errors from routes/middleware
@@ -103,7 +98,6 @@ async function startServer() {
       const heapUsedMB = Math.round(memoryUsage.heapUsed / 1024 / 1024);
       const heapTotalMB = Math.round(memoryUsage.heapTotal / 1024 / 1024);
 
-      // console.log(`💾 Memory: ${heapUsedMB}MB / ${heapTotalMB}MB`);
 
       // Alert if memory usage is high
       if (memoryUsage.heapUsed > 500 * 1024 * 1024) {
